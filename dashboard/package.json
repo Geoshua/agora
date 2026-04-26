@@ -1,13 +1,30 @@
 {
   "name": "@andromeda/dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda local dashboard. Phase 3 ships the headless control plane (in MCP) + this CLI; the Tauri GUI shell is deferred per ADR 0006.",
+  "description": "Andromeda local dashboard — Vite + React + TS + Tailwind + Zustand SPA, talks to the MCP control plane.",
   "scripts": {
-    "dev": "node src/control-plane-cli.js",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 5173",
     "cli": "node src/control-plane-cli.js",
-    "build": "node src/tauri-build-stub.js",
-    "tauri:build": "node src/tauri-build-stub.js"
+    "tauri:dev": "node src/tauri-build-stub.js dev",
+    "tauri:build": "node src/tauri-build-stub.js build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
   }
 }

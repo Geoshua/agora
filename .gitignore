@@ -19,6 +19,7 @@ npm-debug.log*
 # build outputs
 packages/*/dist/
 dist/
+*.tsbuildinfo
 
 # andromeda local state
 ~/.andromeda/

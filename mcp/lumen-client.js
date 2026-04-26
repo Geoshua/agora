@@ -15,6 +15,7 @@ import "dotenv/config";
 import { LNClient } from "@getalby/sdk";
 import { reserve, confirm } from "./budget.js";
 import { tryBuyerIdentity } from "./identity.js";
+import { appendTransaction } from "./transactions-log.js";
 
 // New env name first, legacy fallback per ADR 0002.
 export const PROVIDER =
@@ -84,6 +85,20 @@ export async function callPaidEndpoint(path, args) {
     throw new Error(`replay ${r2.status}: ${text.slice(0, 200)}`);
   }
   const body = await r2.json();
+
+  // ── local transaction log (best-effort; used by dashboard) ─────────
+  try {
+    appendTransaction({
+      kind: path.includes("listing-verify") ? "verify" : path.includes("order-receipt") ? "receipt" : "other",
+      amount_sats: challenge.amount_sats,
+      service: path,
+      seller_pubkey: body?.seller_pubkey ?? null,
+      seller_name: body?.seller_name ?? null,
+      provider_url: PROVIDER,
+      payment_hash: challenge.payment_hash,
+    });
+  } catch {}
+
   return {
     ok: true,
     spent_sats:  challenge.amount_sats,

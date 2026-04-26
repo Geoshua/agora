@@ -31,6 +31,44 @@
   (not 500), `/sitemap.xml` and `/robots.txt` serve, and
   `npm --workspace=web run build` exits clean.
 
+### Phase 3-UI — Dashboard SPA + control-plane proxy (2026-04-26)
+
+- **Dashboard** (`dashboard/`) replaces the CLI placeholder with a
+  Vite 5 + React 18 + TypeScript + Tailwind + Zustand single-screen
+  SPA on port 5173. Five sections (Wallet · Allowance · Active
+  subscriptions · Transactions · Sellers I've used) all backed by the
+  MCP control plane — the UI never speaks to the registry directly.
+  First-run setup asks for the control-plane port + bearer token (read
+  from `~/.andromeda/control-port` + `control-token`), persisted to
+  `localStorage`. The legacy CLI lives on as `npm run dashboard:cli`.
+- **Control-plane proxy** (`mcp/control-plane.js`) gains five additive
+  HTTP endpoints (Bearer-auth, localhost-only):
+    GET  /balance                       — wallet balance via NWC
+    GET  /transactions                  — ~/.andromeda/transactions.log
+    GET  /subscriptions                 — aggregated state with runway
+    POST /subscriptions/:id/cancel      — proxy to seller cancel
+    GET  /sellers                       — proxy to registry sellers list
+  CORS allow-list is `http://localhost:5173` only — no wildcard. The
+  preflight from any other origin returns 403.
+- **Transaction log** (`mcp/transactions-log.js`) — append-only JSONL
+  at `~/.andromeda/transactions.log`. `mcp/lumen-client.js` writes a
+  row on every settled paid call (kind, sats, service path, payment
+  hash, provider URL).
+- **Tauri shell** — best-effort detection. When `cargo` is on PATH,
+  `npm run dashboard:tauri:dev/build` delegates to the Tauri CLI;
+  without it, both scripts print actionable "install Rust" instructions
+  and exit 0 (CI stays green). The SPA runs identically as a browser
+  tab today.
+- **Existing endpoints + MCP tool shapes are FROZEN** — Phase 3-UI is
+  additive only. `lumen_*` aliases survive intact. Original Phase 3
+  control-plane endpoints (`/healthz`, `/session`, `/session/budget`,
+  `/session/kill-switch`, `/events`) are unchanged.
+- ADR 0011 — dashboard implementation (Vite SPA over Tauri-only,
+  CORS scope decision, why control-plane proxies registry data).
+- New scripts: `dashboard:dev`, `dashboard:build`, `dashboard:cli`,
+  `dashboard:tauri:dev`, `dashboard:tauri:build`, `test:phase3-ui`.
+- Phase 3-UI test gate (`scripts/test-phase3-ui.js`) — PASS · 16/16.
+
 ### Phase 6 — Dataset seller + platform fee (2026-04-26)
 
 - New workspace `agents/dataset-seller/` (port 3200). Sells one

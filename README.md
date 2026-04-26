@@ -36,8 +36,9 @@ Two endpoints, ~250 lines of code, the L402 protocol from the brief.
 | `provider/`         | Next.js 16 service that sells `listing-verify` over L402.     |
 | `buyer/`            | Node script — the AI agent that auto-pays the paywall.        |
 | `mcp/`              | **PayMyAgent** — MCP server so Claude Desktop / Cursor can hire LUMEN providers per task. See [`PAYMYAGENT.md`](PAYMYAGENT.md). |
+| `dashboard/`        | Vite + React + TS + Tailwind SPA. One-screen view of wallet, allowance, subs, txs, sellers. Talks to the MCP control plane on `127.0.0.1`. ADR 0011. |
 | `web/`              | **Public web index** (Phase 7) — read-only Next.js site over the registry. Port 3300. See [Public web index](#public-web-index) below. |
-| `scripts/`          | `preflight.js`, `test-phase1.js`, `test-mcp.js`, `test-phase7.js`, … |
+| `scripts/`          | `preflight.js`, `test-phase1.js`, `test-mcp.js`, `test-phase3-ui.js`, `test-phase7.js`, … |
 | `demo.js`           | One-command launcher for provider + buyer.                    |
 
 ### Public web index
@@ -79,6 +80,57 @@ npm run demo:multi
 You should see the provider start, the buyer run once, the steps print out, and
 the verification proof + signed receipt come back. The provider stays up at
 <http://localhost:3000> afterwards — visit it in a browser to see the dashboard.
+
+---
+
+## Dashboard UI
+
+A single-screen local dashboard lives in `dashboard/` (Vite + React + TS + Tailwind + Zustand).
+It talks only to the **MCP control plane** — never to the registry directly — so
+the bearer token, kill switch, and CORS scope cover every section.
+
+```bash
+# 1. Make sure the MCP is running (writes the port + token to ~/.andromeda/):
+npm run mcp
+
+# 2. In another terminal, start the dashboard SPA on http://localhost:5173:
+npm run dashboard
+```
+
+On first load the SPA asks for the **port** (`~/.andromeda/control-port`) and
+**bearer token** (`~/.andromeda/control-token`). Paste both — they're cached
+in `localStorage`, so subsequent visits go straight to the dashboard.
+
+Sections:
+
+- **Wallet** — NWC balance, top-up button (opens Alby Hub), last 10 local txs.
+- **Allowance** — daily-cap slider, per-call slider, big red kill-switch toggle.
+- **Active subscriptions** — sat-per-event subs with runway estimate + cancel.
+- **Transactions** — `~/.andromeda/transactions.log` (full history, JSONL).
+- **Sellers I've used** — txs grouped by seller with totals + last interaction.
+
+### Tauri shell (optional)
+
+`npm run dashboard:tauri:build` will use the real Tauri CLI when `cargo` is on
+PATH. Without Rust installed, it prints actionable instructions and exits 0 —
+the SPA is always usable in a browser regardless. ADR 0011 captures the
+SPA-first-Tauri-optional decision.
+
+```bash
+# enable Tauri (one-time)
+cargo install tauri-cli
+cd dashboard && npx tauri init
+```
+
+### Dashboard test gate
+
+```bash
+npm run test:phase3-ui          # PASS · 16/16
+```
+
+Spawns a fresh MCP control plane, hits all 5 new HTTP proxies, verifies CORS
+preflight from `http://localhost:5173` works and from `http://evil.com` is
+rejected, builds the SPA, and string-matches the endpoint paths in the bundle.
 
 ---
 
