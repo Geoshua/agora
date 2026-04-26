@@ -2,6 +2,8 @@
 
 Six slide-ready SVGs covering the architecture, the L402 flow, identity, phase progression, money flow, and the MCP bridge. Drop straight into a deck or embed in a README. Mermaid mirrors below render inline on GitHub.
 
+**📄 Bundled PDF deck:** [`agora-tech-demo.pdf`](agora-tech-demo.pdf) — 8 pages (cover + 6 diagrams + 60-s script + numbers/commands appendix). Rebuild with `node tools/build-demo-pdf.mjs`.
+
 ## SVG files
 
 | File | Use it for |

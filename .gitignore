@@ -40,3 +40,4 @@ registry/build/
 # os
 .DS_Store
 Thumbs.db
+tools/_tmp/
