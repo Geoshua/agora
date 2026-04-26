@@ -36,3 +36,16 @@ export async function sellerUrl(pubkey) {
   const j = await getSeller(pubkey);
   return j.seller?.url ?? null;
 }
+
+export async function recommend(body) {
+  const r = await fetch(`${REGISTRY}/api/v1/orchestrator/recommend`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`recommend ${r.status}: ${t.slice(0, 200)}`);
+  }
+  return r.json();
+}

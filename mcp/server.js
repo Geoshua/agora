@@ -431,6 +431,37 @@ server.registerTool(
   },
 );
 
+// ─── andromeda_recommend (NEW — Phase 4 orchestrator) ───────────────
+server.registerTool(
+  "andromeda_recommend",
+  {
+    title: "Andromeda — orchestrator recommends services for an intent",
+    description:
+      "Given a free-text intent (e.g. 'watch for security problems in the code we ship'), " +
+      "the orchestrator ranks every registered Andromeda service by intent match (60%), " +
+      "honor (20%), and price fit (20%). Returns ranked results with explainable per-factor scores. " +
+      "Optionally filter by max_price_sats, min_honor, or type. Free.",
+    inputSchema: {
+      intent: z.string().min(2).describe("Free-text description of what you want done"),
+      max_price_sats: z.number().int().positive().optional(),
+      min_honor: z.number().nonnegative().optional(),
+      type: z.string().optional(),
+    },
+  },
+  async ({ intent, max_price_sats, min_honor, type }) => {
+    try {
+      const r = await registry.recommend({ intent, max_price_sats, min_honor, type });
+      return ok({
+        intent: r.intent,
+        filter: r.filter,
+        weights: r.weights,
+        results: r.results,
+        excluded: r.excluded,
+      });
+    } catch (e) { return fail(`recommend failed: ${e.message}`); }
+  },
+);
+
 // ─── connect ──────────────────────────────────────────────────────────
 async function main() {
   // Fire-and-forget: generate buyer keypair if missing. Don't block startup.

@@ -2,6 +2,25 @@
 
 ## Unreleased — Andromeda
 
+### Phase 4 — Orchestrator (recommend) (2026-04-26)
+
+- New registry endpoint `POST /api/v1/orchestrator/recommend`. Body:
+  `{ intent, max_price_sats?, min_honor?, type? }` → ranked array with
+  per-factor breakdown.
+- Ranking formula: `score = 0.6 * intent_match + 0.2 * honor_normalized
+  + 0.2 * price_fit`. Each result includes the four numbers so the
+  recommendation is explainable.
+- Embeddings: deterministic-hash pseudo-embedding (384-dim Float32, L2-
+  normalized). Stored in `services.embedding_blob` BLOB. Backfilled on
+  first /recommend call. ADR 0007 captures the choice and the upgrade
+  path to `@xenova/transformers` later.
+- Excluded results return with `reason: "no service within price"` (or
+  similar) so the caller can explain to the user why a service didn't
+  appear.
+- New MCP tool: `andromeda_recommend(intent, max_price_sats?, min_honor?, type?)`.
+- ADR 0007 — pseudo-embedding decision.
+- Phase 4 test gate (`scripts/test-phase4.js`) — PASS · 11/11.
+
 ### Phase 3 — Local control plane + kill-switch (2026-04-26)
 
 - MCP server gains a localhost-only HTTP control plane (random port,

@@ -117,7 +117,28 @@ export function upsertService(row: {
   db().prepare(`INSERT INTO services_fts (id, name, description, tags) VALUES (?, ?, ?, ?)`)
     .run(id, row.name, row.description, (row.tags ?? []).join(" "));
 
+  // Compute and store embedding (Phase 4).
+  // Lazy import to avoid pulling embeddings.ts into Phase-1-only code paths.
+  try {
+    // Synchronous require not available in ESM; use top-level dynamic import
+    // via globalThis cache so we only load once.
+    setEmbeddingForService(id, row.name, row.description, row.tags ?? []);
+  } catch {
+    // Embedding failure is non-fatal — search still works without it.
+  }
+
   return { id };
+}
+
+// Set lazily — avoids circular dependency between db.ts and embeddings.ts.
+let _embedFn: ((id: string, name: string, desc: string, tags: string[]) => void) | null = null;
+export function registerEmbeddingHook(fn: typeof _embedFn) { _embedFn = fn; }
+function setEmbeddingForService(id: string, name: string, desc: string, tags: string[]) {
+  if (_embedFn) _embedFn(id, name, desc, tags);
+}
+
+export function listAllServicesWithEmbeddings(): Array<ServiceRow & { embedding: Buffer | null }> {
+  return db().prepare(`SELECT * FROM services`).all() as Array<ServiceRow & { embedding: Buffer | null }>;
 }
 
 export function listServices(opts: {
