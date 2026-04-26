@@ -3,6 +3,22 @@
 //
 //  • Real:  @getalby/sdk NWCClient via nostr+walletconnect://… URL.
 //  • Mock:  in-process, bolt-11-shaped invoices, deterministic preimage.
+//
+//  Status (ADR 0014):
+//    The seller-side L402 wire format moved to MoneyDevKit's macaroon
+//    shape. In a future revision the provider will plug into MDK's
+//    @moneydevkit/nextjs/server.withPayment helper for real-mode
+//    invoice issuance — at that point the NWC code path here becomes
+//    fully redundant and can be removed. We keep this file unchanged
+//    today because:
+//      1. mock mode (the default) still uses the mock branch as the
+//         source of fake bolt-11 invoices and deterministic preimages;
+//      2. the buyer-side `provider/api/dev/pay` endpoint reads the
+//         `mockStore` via `mockPreimageFor` to satisfy the L402 replay;
+//      3. no live MDK_ACCESS_TOKEN exists in CI / test gates, so the
+//         provider continues to use this adapter for offline runs.
+//    The full MDK-managed Lightning rail is documented in ADR 0014
+//    §"Migration timeline".
 // ─────────────────────────────────────────────────────────────────────
 
 import { NWCClient } from "@getalby/sdk";

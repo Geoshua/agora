@@ -76,6 +76,8 @@ export async function POST(req: Request) {
       "x-lumen-paid-sats": String(result.body.amount),
       "x-lumen-preimage": result.preimage.slice(0, 8) + "...",
       "x-lumen-receipt-id": receipt_id,
+      // ADR 0014: surface which macaroon family verified.
+      "x-agora-l402-family": result.family,
     },
   });
   return finalize(ctx, res, result.body.amount);
