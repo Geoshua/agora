@@ -10,8 +10,10 @@ import { sha512 } from "@noble/hashes/sha2.js";
 // best-effort wire-up — every caller in this package uses the async
 // surface (getPublicKeyAsync / signAsync) so missing-sync is harmless.
 try {
-  // @ts-expect-error: etc is frozen in @noble/ed25519 ≥2.2; older versions allow.
-  ed.etc.sha512Sync = (...msgs: Uint8Array[]) => sha512(ed.etc.concatBytes(...msgs));
+  // etc is frozen in @noble/ed25519 ≥2.2 — assignment throws at runtime; older
+  // versions allow it. The runtime try/catch is the actual safety net.
+  (ed.etc as { sha512Sync?: (...msgs: Uint8Array[]) => Uint8Array }).sha512Sync =
+    (...msgs: Uint8Array[]) => sha512(ed.etc.concatBytes(...msgs));
 } catch { /* sync hook unavailable; async APIs unaffected */ }
 // Reference sha512 so the import doesn't get tree-shaken:
 void sha512;
