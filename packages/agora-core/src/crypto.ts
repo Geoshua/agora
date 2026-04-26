@@ -4,15 +4,17 @@
 // rest of the codebase doesn't have to think about Uint8Array vs hex.
 
 import * as ed from "@noble/ed25519";
-import { sha512 } from "@noble/hashes/sha2";
+import { sha512 } from "@noble/hashes/sha2.js";
 
-// noble v2 ships pure-async by default; wire the sha512 sync hook so
-// the sync getPublicKey is available too. Async path also works without
-// this, but having sync is convenient for tests.
-ed.etc.sha512Sync = (...msgs: Uint8Array[]) => {
-  const concat = ed.etc.concatBytes(...msgs);
-  return sha512(concat);
-};
+// noble v2.2 freezes ed.etc, so the legacy sha512Sync hook is a
+// best-effort wire-up — every caller in this package uses the async
+// surface (getPublicKeyAsync / signAsync) so missing-sync is harmless.
+try {
+  // @ts-expect-error: etc is frozen in @noble/ed25519 ≥2.2; older versions allow.
+  ed.etc.sha512Sync = (...msgs: Uint8Array[]) => sha512(ed.etc.concatBytes(...msgs));
+} catch { /* sync hook unavailable; async APIs unaffected */ }
+// Reference sha512 so the import doesn't get tree-shaken:
+void sha512;
 
 const HEX_RX = /^[0-9a-f]+$/i;
 
@@ -44,7 +46,9 @@ export type Keypair = {
 
 /** Generate a new Ed25519 keypair using OS randomness. */
 export async function generateKeypair(): Promise<Keypair> {
-  const sk = ed.utils.randomPrivateKey();
+  // noble v2.2 renamed randomPrivateKey → randomSecretKey. Support both.
+  const utils = ed.utils as { randomPrivateKey?: () => Uint8Array; randomSecretKey?: () => Uint8Array };
+  const sk = (utils.randomPrivateKey ?? utils.randomSecretKey)!();
   const pk = await ed.getPublicKeyAsync(sk);
   return { privkey_hex: bytesToHex(sk), pubkey_hex: bytesToHex(pk) };
 }

@@ -16,7 +16,7 @@
 // Verifier rejects timestamps older than DEFAULTS.SIGNATURE_VALIDITY_MS
 // or further in the future than the same window (clock skew).
 
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { signUtf8, verifyUtf8, bytesToHex } from "./crypto.js";
 import { DEFAULTS } from "./config.js";
 
