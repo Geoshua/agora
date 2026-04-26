@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 700" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <rect width="1400" height="700" fill="#ffffff"/>
+
+  <text x="700" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#111827">Build progression  ·  8 phases  ·  144/144 tests green</text>
+  <text x="700" y="72" text-anchor="middle" font-size="14" fill="#6b7280">each phase ships with a test gate · existing endpoints frozen · additive-only</text>
+
+  <!-- TIMELINE -->
+  <line x1="80" y1="200" x2="1320" y2="200" stroke="#cbd5e1" stroke-width="3"/>
+
+  <!-- 8 phase markers -->
+  <g font-size="13" fill="#1f2937">
+    <!-- Phase 0 -->
+    <circle cx="155" cy="200" r="22" fill="#4f46e5"/>
+    <text x="155" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">0</text>
+    <text x="155" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">@agora/core</text>
+    <text x="155" y="248" text-anchor="middle" font-size="11" fill="#4b5563">Ed25519 + signed-req</text>
+    <text x="155" y="264" text-anchor="middle" font-size="11" fill="#4b5563">L402 + types</text>
+    <text x="155" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 16/16</text>
+
+    <!-- Phase 1 -->
+    <circle cx="300" cy="200" r="22" fill="#4f46e5"/>
+    <text x="300" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">1</text>
+    <text x="300" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">Registry</text>
+    <text x="300" y="248" text-anchor="middle" font-size="11" fill="#4b5563">multi-seller catalog</text>
+    <text x="300" y="264" text-anchor="middle" font-size="11" fill="#4b5563">tx ledger · FTS5</text>
+    <text x="300" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 20/20</text>
+
+    <!-- Phase 2 -->
+    <circle cx="445" cy="200" r="22" fill="#d97706"/>
+    <text x="445" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">2</text>
+    <text x="445" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#92400e">Subscriptions</text>
+    <text x="445" y="248" text-anchor="middle" font-size="11" fill="#4b5563">market-monitor</text>
+    <text x="445" y="264" text-anchor="middle" font-size="11" fill="#4b5563">prepaid · alerts</text>
+    <text x="445" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 13/13</text>
+
+    <!-- Phase 3 -->
+    <circle cx="590" cy="200" r="22" fill="#059669"/>
+    <text x="590" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">3</text>
+    <text x="590" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Control plane</text>
+    <text x="590" y="248" text-anchor="middle" font-size="11" fill="#4b5563">localhost HTTP</text>
+    <text x="590" y="264" text-anchor="middle" font-size="11" fill="#4b5563">kill switch · budget</text>
+    <text x="590" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 12/12</text>
+
+    <!-- Phase 3-UI -->
+    <circle cx="735" cy="200" r="22" fill="#475569"/>
+    <text x="735" y="206" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">3-UI</text>
+    <text x="735" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#1e293b">Dashboard SPA</text>
+    <text x="735" y="248" text-anchor="middle" font-size="11" fill="#4b5563">React + Vite</text>
+    <text x="735" y="264" text-anchor="middle" font-size="11" fill="#4b5563">5 sections · :5173</text>
+    <text x="735" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 16/16</text>
+
+    <!-- Phase 4 -->
+    <circle cx="880" cy="200" r="22" fill="#4f46e5"/>
+    <text x="880" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">4</text>
+    <text x="880" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">Orchestrator</text>
+    <text x="880" y="248" text-anchor="middle" font-size="11" fill="#4b5563">embedding ranking</text>
+    <text x="880" y="264" text-anchor="middle" font-size="11" fill="#4b5563">explainable scores</text>
+    <text x="880" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 13/13</text>
+
+    <!-- Phase 5 -->
+    <circle cx="1025" cy="200" r="22" fill="#4f46e5"/>
+    <text x="1025" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">5</text>
+    <text x="1025" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">Honor + reviews</text>
+    <text x="1025" y="248" text-anchor="middle" font-size="11" fill="#4b5563">peer review · escrow</text>
+    <text x="1025" y="264" text-anchor="middle" font-size="11" fill="#4b5563">slashing · decay</text>
+    <text x="1025" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 17/17</text>
+
+    <!-- Phase 6 -->
+    <circle cx="1170" cy="200" r="22" fill="#d97706"/>
+    <text x="1170" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">6</text>
+    <text x="1170" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#92400e">Dataset seller</text>
+    <text x="1170" y="248" text-anchor="middle" font-size="11" fill="#4b5563">NOAA weather</text>
+    <text x="1170" y="264" text-anchor="middle" font-size="11" fill="#4b5563">platform fee 2%</text>
+    <text x="1170" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 11/11</text>
+
+    <!-- Phase 7 -->
+    <circle cx="1315" cy="200" r="22" fill="#475569"/>
+    <text x="1315" y="206" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">7</text>
+    <text x="1315" y="170" text-anchor="middle" font-size="13" font-weight="700" fill="#1e293b">Public web</text>
+    <text x="1315" y="248" text-anchor="middle" font-size="11" fill="#4b5563">Next.js RSC :3300</text>
+    <text x="1315" y="264" text-anchor="middle" font-size="11" fill="#4b5563">8 pages · /activity</text>
+    <text x="1315" y="290" text-anchor="middle" font-size="10" fill="#10b981" font-weight="700">PASS · 14/14</text>
+  </g>
+
+  <!-- POST-PHASES BAR -->
+  <g transform="translate(80, 380)">
+    <rect width="1240" height="70" rx="10" fill="#fef3c7" stroke="#ca8a04" stroke-width="1.5"/>
+    <text x="20" y="32" font-size="14" font-weight="700" fill="#92400e">⚡ Post-phase deltas</text>
+    <text x="20" y="56" font-size="12" fill="#78350f">MDK migration (ADR 0014): macaroon wire format byte-aligned with mdk402-token-v1 · soft-transition verifier accepts legacy + new shapes</text>
+  </g>
+  <g transform="translate(80, 470)">
+    <rect width="1240" height="70" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="20" y="32" font-size="14" font-weight="700" fill="#1e3a8a">🚀 Deploy hardening</text>
+    <text x="20" y="56" font-size="12" fill="#1e40af">Fly.io configs for registry + web · Dockerfiles · admin-secret enforcement (default fallback removed) · DEPLOY.md runbook</text>
+  </g>
+  <g transform="translate(80, 560)">
+    <rect width="1240" height="70" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="20" y="32" font-size="14" font-weight="700" fill="#14532d">📡 Live activity feed</text>
+    <text x="20" y="56" font-size="12" fill="#166534">GET /api/v1/transactions/recent (public, schema agora.transactions.v1) · /activity page on web (live tape, 2s cache)</text>
+  </g>
+
+  <!-- LEGEND -->
+  <g transform="translate(80, 660)">
+    <text x="0" y="0" font-size="11" fill="#6b7280" font-weight="600">PHASE COLOR · ROLE</text>
+    <circle cx="170" cy="-4" r="6" fill="#4f46e5"/><text x="183" y="0" font-size="11" fill="#4b5563">Registry / shared</text>
+    <circle cx="290" cy="-4" r="6" fill="#d97706"/><text x="303" y="0" font-size="11" fill="#4b5563">Sellers</text>
+    <circle cx="365" cy="-4" r="6" fill="#059669"/><text x="378" y="0" font-size="11" fill="#4b5563">MCP / buyer-side</text>
+    <circle cx="485" cy="-4" r="6" fill="#475569"/><text x="498" y="0" font-size="11" fill="#4b5563">UI surface</text>
+    <text x="900" y="0" font-size="11" fill="#10b981" font-weight="600">All gates green: 144/144 across 10 test scripts</text>
+  </g>
+</svg>

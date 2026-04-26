@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2937"/>
+    </marker>
+    <marker id="arr2-y" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ca8a04"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="720" fill="#ffffff"/>
+
+  <text x="600" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#111827">L402 round-trip  ·  402 → invoice → pay → replay → 200</text>
+  <text x="600" y="72" text-anchor="middle" font-size="14" fill="#6b7280">~200 ms end-to-end on Lightning mainnet · no accounts, no API keys</text>
+
+  <!-- LANES -->
+  <g font-size="14" font-weight="700" fill="#1f2937">
+    <text x="170" y="120" text-anchor="middle">BUYER (MCP)</text>
+    <text x="450" y="120" text-anchor="middle">PROVIDER (:3000)</text>
+    <text x="780" y="120" text-anchor="middle">LIGHTNING NETWORK</text>
+    <text x="1060" y="120" text-anchor="middle">WALLET (NWC)</text>
+  </g>
+
+  <!-- LANE LINES -->
+  <line x1="170" y1="140" x2="170" y2="640" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="450" y1="140" x2="450" y2="640" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="780" y1="140" x2="780" y2="640" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="1060" y1="140" x2="1060" y2="640" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- STEP 1: POST without auth -->
+  <g>
+    <line x1="170" y1="180" x2="450" y2="180" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arr2)"/>
+    <text x="310" y="172" text-anchor="middle" font-size="12" fill="#1f2937" font-weight="600">1.  POST /api/v1/listing-verify</text>
+    <text x="310" y="194" text-anchor="middle" font-size="11" fill="#6b7280">no Authorization header</text>
+  </g>
+
+  <!-- STEP 2: provider mints invoice via wallet -->
+  <g>
+    <line x1="450" y1="240" x2="1060" y2="240" stroke="#ca8a04" stroke-width="1.6" marker-end="url(#arr2-y)"/>
+    <text x="755" y="232" text-anchor="middle" font-size="12" fill="#92400e" font-weight="600">2.  makeInvoice(240 sat, ttl=300s)</text>
+    <text x="755" y="254" text-anchor="middle" font-size="11" fill="#a16207">via NWC: nostr+walletconnect://…</text>
+  </g>
+
+  <!-- STEP 3: 402 challenge -->
+  <g>
+    <line x1="450" y1="300" x2="170" y2="300" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arr2)"/>
+    <text x="310" y="292" text-anchor="middle" font-size="12" fill="#1f2937" font-weight="600">3.  HTTP 402 Payment Required</text>
+    <text x="310" y="314" text-anchor="middle" font-size="11" fill="#6b7280">WWW-Authenticate: L402 macaroon="…", invoice="lnbc…"</text>
+  </g>
+
+  <!-- STEP 4: pay invoice -->
+  <g>
+    <line x1="170" y1="360" x2="1060" y2="360" stroke="#ca8a04" stroke-width="1.6" marker-end="url(#arr2-y)"/>
+    <text x="615" y="352" text-anchor="middle" font-size="12" fill="#92400e" font-weight="600">4.  pay(invoice)  →  Lightning settles in &lt;1 s</text>
+    <text x="615" y="374" text-anchor="middle" font-size="11" fill="#a16207">buyer-side guardrails: per-call cap, session budget, kill switch — all checked first</text>
+  </g>
+
+  <!-- STEP 5: preimage returned -->
+  <g>
+    <line x1="1060" y1="420" x2="170" y2="420" stroke="#ca8a04" stroke-width="1.6" stroke-dasharray="4,3" marker-end="url(#arr2-y)"/>
+    <text x="615" y="412" text-anchor="middle" font-size="12" fill="#92400e" font-weight="600">5.  preimage (32-byte secret) returned to buyer</text>
+    <text x="615" y="434" text-anchor="middle" font-size="11" fill="#a16207">preimage is the cryptographic proof of payment</text>
+  </g>
+
+  <!-- STEP 6: replay -->
+  <g>
+    <line x1="170" y1="490" x2="450" y2="490" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arr2)"/>
+    <text x="310" y="482" text-anchor="middle" font-size="12" fill="#1f2937" font-weight="600">6.  POST /api/v1/listing-verify (replay)</text>
+    <text x="310" y="504" text-anchor="middle" font-size="11" fill="#6b7280">Authorization: L402 &lt;macaroon&gt;:&lt;preimage&gt;</text>
+  </g>
+
+  <!-- STEP 7: verify, return result -->
+  <g>
+    <line x1="450" y1="560" x2="170" y2="560" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arr2)"/>
+    <text x="310" y="552" text-anchor="middle" font-size="12" fill="#1f2937" font-weight="600">7.  HTTP 200 OK + verification result</text>
+    <text x="310" y="574" text-anchor="middle" font-size="11" fill="#6b7280">verifier checks: HMAC of macaroon · sha256(preimage)===payment_hash</text>
+  </g>
+
+  <!-- VERIFICATION CALLOUT -->
+  <g>
+    <rect x="490" y="490" width="280" height="100" rx="8" fill="#fef3c7" stroke="#ca8a04" stroke-width="1.2"/>
+    <text x="630" y="514" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">VERIFIER CHECKS</text>
+    <text x="500" y="536" font-size="11" fill="#78350f">  1. macaroon HMAC valid (server secret)</text>
+    <text x="500" y="554" font-size="11" fill="#78350f">  2. sha256(preimage) === payment_hash</text>
+    <text x="500" y="572" font-size="11" fill="#78350f">  3. macaroon resource matches request path</text>
+    <text x="500" y="588" font-size="11" fill="#78350f">  4. macaroon not yet consumed (single-use)</text>
+  </g>
+
+  <!-- TIMING ANNOTATION -->
+  <g>
+    <line x1="120" y1="180" x2="120" y2="560" stroke="#9ca3af" stroke-width="1"/>
+    <line x1="115" y1="180" x2="125" y2="180" stroke="#9ca3af" stroke-width="1"/>
+    <line x1="115" y1="560" x2="125" y2="560" stroke="#9ca3af" stroke-width="1"/>
+    <text x="60" y="370" font-size="13" font-weight="600" fill="#374151">~200 ms</text>
+    <text x="60" y="388" font-size="11" fill="#9ca3af">(end-to-end</text>
+    <text x="60" y="402" font-size="11" fill="#9ca3af"> mainnet)</text>
+  </g>
+
+  <!-- BOTTOM ANNOTATION -->
+  <text x="600" y="676" text-anchor="middle" font-size="13" fill="#4b5563" font-style="italic">In mock mode, steps 2/4/5 short-circuit through /api/dev/pay — same wire format, no sats move.</text>
+  <text x="600" y="694" text-anchor="middle" font-size="11" fill="#9ca3af">Macaroon wire format is byte-compatible with MoneyDevKit's mdk402-token-v1.</text>
+</svg>
