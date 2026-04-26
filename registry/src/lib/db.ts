@@ -208,6 +208,22 @@ export function sellerStats(pubkey: string): { tx_count: number; sats_earned: nu
   return r;
 }
 
+export type RecentTxRow = TxRow & {
+  seller_name?: string;
+  service_name?: string;
+};
+
+export function listRecentTransactions(limit = 50): RecentTxRow[] {
+  return db().prepare(`
+    SELECT t.*, s.name AS seller_name, sv.name AS service_name
+      FROM transactions t
+      LEFT JOIN sellers s  ON s.pubkey = t.seller_pubkey
+      LEFT JOIN services sv ON sv.id   = t.service_id
+     ORDER BY t.settled_at DESC
+     LIMIT ?
+  `).all(Math.max(1, Math.min(200, limit))) as TxRow[];
+}
+
 export function platformRevenue(): { total_fee_sats: number; tx_count: number } {
   const r = db().prepare(`
     SELECT COUNT(*) as tx_count, COALESCE(SUM(platform_fee_sats), 0) as total_fee_sats

@@ -208,3 +208,20 @@ export async function aggregateStats(): Promise<{
 export async function sellerStats(pubkey: string): Promise<SellerStats | null> {
   return safeJson(`${REGISTRY_URL}/api/v1/sellers/${pubkey}/stats`, LIST_REVALIDATE);
 }
+
+export type RecentTx = {
+  id: string;
+  buyer_pubkey: string;
+  seller_pubkey: string;
+  seller_name: string | null;
+  service_id: string;
+  service_name: string | null;
+  amount_sats: number;
+  platform_fee_sats: number;
+  payment_hash: string;
+  settled_at: number;
+};
+
+export async function listRecentTransactions(limit = 50): Promise<{ transactions: RecentTx[]; count: number } | null> {
+  return safeJson(`${REGISTRY_URL}/api/v1/transactions/recent?limit=${limit}`, NO_STORE);
+}

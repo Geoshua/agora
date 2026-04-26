@@ -46,6 +46,7 @@ function SiteHeader() {
         <nav className="hidden sm:flex items-center gap-5 text-sm text-zinc-600 dark:text-zinc-300 font-mono uppercase tracking-wider">
           <Link href="/sellers" className="hover:text-amber">Sellers</Link>
           <Link href="/services" className="hover:text-amber">Services</Link>
+          <Link href="/activity" className="hover:text-amber">Activity</Link>
           <Link href="/search" className="hover:text-amber">Search</Link>
           <Link href="/recommend" className="hover:text-amber">Recommend</Link>
         </nav>
