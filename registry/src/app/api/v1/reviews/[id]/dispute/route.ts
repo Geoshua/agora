@@ -41,5 +41,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     signing_secret: SIGNING_SECRET,
   });
   if (!r.ok) return Response.json({ error: r.reason }, { status: 409 });
-  return Response.json({ ok: true, ...r });
+  return Response.json({ ...r, ok: true });
 }

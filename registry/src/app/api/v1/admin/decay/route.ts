@@ -4,15 +4,15 @@
 // fast-forward 90+ days. In production, decay runs lazily.
 
 import { forceRunDecay, maybeRunDecay } from "@/lib/reviews";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const denied = requireAdmin(req);
+  if (denied) return denied;
   const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
-  const secret = req.headers.get("x-admin-secret") ?? "";
-  const expected = process.env.ADMIN_SECRET ?? "dev-admin-secret";
-  if (secret !== expected) return Response.json({ error: "unauthorized" }, { status: 401 });
   const r = force ? forceRunDecay() : maybeRunDecay();
   return Response.json({ ok: true, ...r });
 }

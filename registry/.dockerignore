@@ -1,0 +1,24 @@
+# Keep the build context small — Docker copies what it needs from the repo
+# root via the multi-stage build. Don't ship local state into the image.
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/build
+
+# DBs and runtime state
+*.db
+*.db-wal
+*.db-shm
+
+# Local env files (secrets) — explicitly never copied into images.
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Misc
+.git
+.gitignore
+.DS_Store
+Thumbs.db
+**/*.log

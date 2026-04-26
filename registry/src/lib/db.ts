@@ -8,6 +8,13 @@ import { fileURLToPath } from "node:url";
 let _db: Database.Database | null = null;
 
 function migrationsDir(): string {
+  // Explicit env override wins — set this in containerized deployments where
+  // the bundled migrations directory is at a known absolute path.
+  const fromEnv = process.env.AGORA_MIGRATIONS_DIR;
+  if (fromEnv) {
+    if (existsSync(fromEnv)) return fromEnv;
+    throw new Error(`AGORA_MIGRATIONS_DIR=${fromEnv} does not exist`);
+  }
   // We compile via Next.js so __dirname isn't reliable. Walk up from cwd
   // to find a sibling `migrations/` folder.
   // In `next dev` cwd is the registry/ workspace.

@@ -1,13 +1,13 @@
 // GET /v1/platform/revenue — admin-secret protected.
 
 import { platformRevenue } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const secret = req.headers.get("x-admin-secret") ?? "";
-  const expected = process.env.ADMIN_SECRET ?? "dev-admin-secret";
-  if (secret !== expected) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const denied = requireAdmin(req);
+  if (denied) return denied;
   const r = platformRevenue();
   return Response.json({
     ok: true,

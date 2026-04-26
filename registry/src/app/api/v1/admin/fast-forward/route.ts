@@ -5,13 +5,13 @@
 // the decay job's 90-day cutoff applies.
 
 import { db } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const secret = req.headers.get("x-admin-secret") ?? "";
-  const expected = process.env.ADMIN_SECRET ?? "dev-admin-secret";
-  if (secret !== expected) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const denied = requireAdmin(req);
+  if (denied) return denied;
   let body: { sellers_inactive_days?: number };
   try { body = await req.json(); }
   catch { return Response.json({ error: "invalid JSON" }, { status: 400 }); }

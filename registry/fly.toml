@@ -1,0 +1,47 @@
+# Agora registry — single-instance Next.js + SQLite on a Fly volume.
+# IMPORTANT: keep this single-instance. SQLite cannot be shared across
+# multiple Fly machines mounting the same volume. Deploy with
+# `fly deploy --ha=false` and never scale beyond 1.
+
+app = "agora-registry"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3030"
+  HOSTNAME = "0.0.0.0"
+  AGORA_REGISTRY_DB_PATH = "/data/registry.db"
+  AGORA_MIGRATIONS_DIR = "/app/registry/migrations"
+
+[mounts]
+  source = "agora_registry_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3030
+  force_https = true
+  # SQLite on a volume cannot survive horizontal scale-out. Keep min=1
+  # so the single instance never goes cold-with-volume-detached, and
+  # rely on auto_stop_machines to suspend on idle.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 100
+    soft_limit = 50
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/api/v1/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

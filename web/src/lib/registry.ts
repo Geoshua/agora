@@ -1,11 +1,24 @@
 // Typed fetcher for the Agora registry's public REST endpoints.
 // All functions are server-side. No client API surface here.
 
-export const REGISTRY_URL =
-  process.env.AGORA_REGISTRY_URL ??
-  process.env.ANDROMEDA_REGISTRY_URL ??
-  process.env.LUMEN_REGISTRY_URL ??
-  "http://localhost:3030";
+function resolveRegistryUrl(): string {
+  const fromEnv =
+    process.env.AGORA_REGISTRY_URL ??
+    process.env.ANDROMEDA_REGISTRY_URL ??
+    process.env.LUMEN_REGISTRY_URL;
+  if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  // During `next build` (NEXT_PHASE === "phase-production-build") no real
+  // requests are made — pages are analyzed but not rendered. Allow the
+  // placeholder so the build can complete; the runtime check below still
+  // fires when the standalone server is started without the env var set.
+  const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+  if (process.env.NODE_ENV === "production" && !isBuildPhase) {
+    throw new Error("AGORA_REGISTRY_URL must be set in production");
+  }
+  return "http://localhost:3030";
+}
+
+export const REGISTRY_URL = resolveRegistryUrl();
 
 export type Seller = {
   pubkey: string;

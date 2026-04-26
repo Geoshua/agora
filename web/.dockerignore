@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/build
+*.db
+*.db-wal
+*.db-shm
+**/.env
+**/.env.local
+**/.env.*.local
+.git
+.gitignore
+.DS_Store
+Thumbs.db
+**/*.log

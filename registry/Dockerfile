@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1.7
+# ─────────────────────────────────────────────────────────────────────
+# Agora registry — Next.js standalone build for Fly.io.
+# Persistent SQLite at /data/registry.db (Fly volume mount).
+# ─────────────────────────────────────────────────────────────────────
+
+ARG NODE_VERSION=20
+
+# ── deps ────────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-bookworm-slim AS deps
+WORKDIR /app
+
+# better-sqlite3 ships prebuilt binaries for linux x64/arm64; build tools
+# are kept around as a fallback in case the prebuild fetch fails.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Workspace manifests — npm needs these to wire up the @agora/* packages.
+# Stub out workspaces we won't build so npm install doesn't error on missing dirs.
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages/agora-core/package.json ./packages/agora-core/
+COPY registry/package.json ./registry/
+COPY provider/package.json ./provider/
+COPY buyer/package.json ./buyer/
+COPY mcp/package.json ./mcp/
+COPY dashboard/package.json ./dashboard/
+COPY web/package.json ./web/
+COPY agents/market-monitor/package.json ./agents/market-monitor/
+COPY agents/dataset-seller/package.json ./agents/dataset-seller/
+
+RUN npm ci --include=dev
+
+# ── builder ─────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-bookworm-slim AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json* tsconfig.base.json ./
+COPY packages ./packages
+COPY registry ./registry
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build --workspace=@agora/registry
+
+# ── runner ──────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION}-bookworm-slim AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3030 \
+    HOSTNAME=0.0.0.0 \
+    AGORA_REGISTRY_DB_PATH=/data/registry.db \
+    AGORA_MIGRATIONS_DIR=/app/registry/migrations
+
+# Standalone output bundles a minimal node_modules + server.js.
+# In a monorepo build the entrypoint lands at <workspace>/server.js.
+COPY --from=builder /app/registry/.next/standalone ./
+COPY --from=builder /app/registry/.next/static ./registry/.next/static
+
+# Persistent volume mount point for SQLite. Fly mounts a volume here.
+RUN mkdir -p /data && chown node:node /data
+USER node
+
+EXPOSE 3030
+
+CMD ["node", "registry/server.js"]

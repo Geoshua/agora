@@ -1,0 +1,37 @@
+# Agora web — public read-only catalog. Stateless; safe to scale horizontally.
+
+app = "agora-web"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3300"
+  HOSTNAME = "0.0.0.0"
+  # AGORA_REGISTRY_URL is set via `fly secrets set` so it can include
+  # the deployed registry's hostname without baking it into the image.
+
+[http_service]
+  internal_port = 3300
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 100
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
