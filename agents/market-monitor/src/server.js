@@ -50,6 +50,10 @@ const PUBLIC_URL =
   process.env.AGORA_PROVIDER_PUBLIC_URL ??
   process.env.ANDROMEDA_PROVIDER_PUBLIC_URL ??
   `http://localhost:${PORT}`;
+// NOTE (ADR 0014): market-monitor has no L402-gated endpoints. Its
+// /api/v1/subscribe is trust-deposit (ADR 0005). L402_SECRET is reused
+// here as the HMAC key for alert payload signatures only — not as a
+// paywall key. Nothing changed in this file under the MDK migration.
 const L402_SECRET = process.env.L402_SECRET ?? "";
 if (L402_SECRET.length < 32) {
   console.warn("[market-monitor] L402_SECRET <32 chars; alert signatures will be weak");
