@@ -24,8 +24,10 @@ What stays local: `mcp/`, `dashboard/`, `buyer/`, sellers (`provider/`,
 
 The Dockerfiles and Fly configs live at the **repo root**, not inside
 `registry/` or `web/`. They need the whole monorepo as the Docker build
-context (the npm workspaces depend on each other), and Fly always uses the
-fly.toml's directory as the build context.
+context (the npm workspaces depend on each other — registry imports
+`@agora/core`, which lives in `packages/agora-core/` and must be built
+first because it exports from `./dist/`). Fly always uses the fly.toml's
+directory as the build context, so config-at-the-root is the simplest path.
 
 ```
 Dockerfile.registry   # multi-stage build for registry/

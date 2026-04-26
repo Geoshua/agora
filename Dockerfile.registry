@@ -41,6 +41,8 @@ COPY packages ./packages
 COPY registry ./registry
 
 ENV NEXT_TELEMETRY_DISABLED=1
+# @agora/core exports from ./dist — build it first so registry's imports resolve.
+RUN npm run build --workspace=@agora/core
 RUN npm run build --workspace=@agora/registry
 
 # ── runner ──────────────────────────────────────────────────────────
