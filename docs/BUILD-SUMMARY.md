@@ -1,7 +1,7 @@
 # Andromeda — build summary
 
-Phases 0 → 6 completed. Phase 7 (public web index) skipped — see
-"phases skipped" at the bottom.
+Phases 0 → 7 completed. Phase 7 (public web index) was the optional
+final phase; it is now built and green.
 
 All test gates: **PASS**. The repo's `lumen` npm name and the
 backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
@@ -18,7 +18,7 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | `dashboard/`                  | NEW (Phase 3) — control-plane CLI shim. Tauri GUI deferred (ADR 0006). |
 | `agents/market-monitor/`      | NEW (Phase 2) — sells github-advisory subscriptions (50 sat/event). Port 3100. |
 | `agents/dataset-seller/`      | NEW (Phase 6) — sells the NOAA PNW 2015-25 dataset (5000 sat). Port 3200. |
-| `web/`                        | Stub workspace for the future Phase-7 public index.                    |
+| `web/`                        | NEW (Phase 7) — Next.js 16 read-only public index of the registry. Port 3300. |
 
 ## Endpoints
 
@@ -93,6 +93,19 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | POST   | `/session/kill-switch`     | Bearer token  |
 | GET    | `/events` (SSE)            | Bearer token  |
 
+### Public web index (port 3300) — read-only, no API
+| Method | Path                                | What it shows                                  |
+|--------|-------------------------------------|------------------------------------------------|
+| GET    | `/`                                 | Hero, headline stats, featured services, how-it-works |
+| GET    | `/sellers`                          | Paginated seller list, sort + name filter      |
+| GET    | `/sellers/:pubkey`                  | Seller detail: services, badges, activity      |
+| GET    | `/services`                         | Service catalog with type/price/honor filters  |
+| GET    | `/services/:id`                     | Service detail + similar (via /recommend)      |
+| GET    | `/search?q=`                        | FTS5-backed search (delegates to registry)     |
+| GET    | `/recommend?intent=`                | Orchestrator score breakdown                   |
+| GET    | `/sitemap.xml`                      | Auto-enumerated from registry                  |
+| GET    | `/robots.txt`                       | Permissive (someday-deployable)                |
+
 ## MCP tools
 
 | Canonical name                          | Deprecated alias    | Cost             | What it does                                     |
@@ -137,8 +150,10 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | 0007| Embeddings: deterministic-hash pseudo-embedder for v0        | Accepted (upgrade path) |
 | 0008| Dataset seller + platform fee                                | Accepted |
 | 0010| Honor & peer review                                          | Accepted |
+| 0012| Public web index (Next.js + RSC, 7 pages, port 3300)         | Accepted |
 
-(0009 was reserved for honor primitives but folded into 0010.)
+(0009 was reserved for honor primitives but folded into 0010.
+0011 unused.)
 
 ## Test scripts
 
@@ -154,8 +169,9 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | `scripts/test-phase4.js`        | **PASS · 11/11** |
 | `scripts/test-phase5.js`        | **PASS · 16/16** |
 | `scripts/test-phase6.js`        | **PASS · 10/10** |
+| `scripts/test-phase7.js`        | **PASS · 14/14** |
 
-Total green checks across new gates: **101/101**.
+Total green checks across new gates: **115/115**.
 
 ## Known limitations (honest)
 
@@ -188,11 +204,8 @@ Total green checks across new gates: **101/101**.
 
 ## Phases skipped
 
-- **Phase 7 — Public web index.** Skipped to honor "OPTIONAL, only if
-  0–6 are green and time permits." All registry data is already
-  exposed via the public REST endpoints; a Next.js read-only index
-  would be a cosmetic addition. The `web/` workspace stub is in place
-  if a future build wants to fill it in.
+None. Phases 0–7 all completed. (Earlier drafts of this document had
+Phase 7 marked skipped.)
 
 ## Build blockers
 
@@ -216,6 +229,7 @@ npm run test:phase3    # 12/12
 npm run test:phase4    # 11/11
 npm run test:phase5    # 16/16
 npm run test:phase6    # 10/10
+npm run test:phase7    # 14/14 (requires registry already running on 3030)
 npm run test:mcp       # 12/12 (legacy regression)
 ```
 

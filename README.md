@@ -36,8 +36,27 @@ Two endpoints, ~250 lines of code, the L402 protocol from the brief.
 | `provider/`         | Next.js 16 service that sells `listing-verify` over L402.     |
 | `buyer/`            | Node script — the AI agent that auto-pays the paywall.        |
 | `mcp/`              | **PayMyAgent** — MCP server so Claude Desktop / Cursor can hire LUMEN providers per task. See [`PAYMYAGENT.md`](PAYMYAGENT.md). |
-| `scripts/`          | `preflight.js`, `test-phase1.js`, `test-mcp.js`               |
+| `web/`              | **Public web index** (Phase 7) — read-only Next.js site over the registry. Port 3300. See [Public web index](#public-web-index) below. |
+| `scripts/`          | `preflight.js`, `test-phase1.js`, `test-mcp.js`, `test-phase7.js`, … |
 | `demo.js`           | One-command launcher for provider + buyer.                    |
+
+### Public web index
+
+A read-only browser-facing site at <http://localhost:3300> that surfaces
+the registry's public REST endpoints. No accounts, no forms, no writes.
+
+```bash
+npm run registry       # in one shell — boots the registry on :3030
+npm run web            # in another — boots the web index on :3300
+# then open http://localhost:3300
+```
+
+Pages: `/` (hero + headline stats + featured services), `/sellers` (list
++ search + sort), `/sellers/:pubkey` (seller detail), `/services`
+(catalog + filters), `/services/:id` (service detail + similar),
+`/search?q=` (FTS5), `/recommend?intent=` (orchestrator score
+breakdown). Server-rendered with Next.js 16 RSC. See
+[ADR 0012](docs/decisions/0012-public-web-index.md) for design.
 
 ---
 

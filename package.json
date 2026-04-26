@@ -32,10 +32,13 @@
     "test:phase4": "node scripts/test-phase4.js",
     "test:phase5": "node scripts/test-phase5.js",
     "test:phase6": "node scripts/test-phase6.js",
+    "test:phase7": "node scripts/test-phase7.js",
     "registry":   "npm run dev --prefix registry",
     "dashboard":  "npm run dev --prefix dashboard",
     "monitor":    "npm run start --prefix agents/market-monitor",
     "datasets":   "npm run start --prefix agents/dataset-seller",
+    "web":        "npm run dev --prefix web",
+    "web:start":  "npm run start --prefix web",
     "mcp":        "node mcp/server.js"
   }
 }

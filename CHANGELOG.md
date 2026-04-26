@@ -2,6 +2,35 @@
 
 ## Unreleased — Andromeda
 
+### Phase 7 — Public web index (2026-04-26)
+
+- New workspace `web/` (port 3300) — Next.js 16 (App Router, RSC) +
+  Tailwind. Read-only browser-facing site backed by the registry's
+  public REST endpoints. No DB, no auth, no write paths.
+- Seven pages: `/` (hero + headline stats + featured services + how
+  it works), `/sellers` (paginated, sortable by honor / registered /
+  tx-count, name search), `/sellers/[pubkey]` (services, badges,
+  activity, pubkey copy, link to registry stats), `/services` (catalog
+  + type / max-price / min-honor filters), `/services/[id]` (endpoint,
+  seller card, similar via /recommend), `/search?q=` (FTS5 delegation
+  + "tried recommend?" banner), `/recommend?intent=` (form +
+  per-result intent_match / honor / price_fit breakdown bars).
+- Tailwind dark/light mode (system pref + click toggle, no FOUC),
+  inline-SVG icons only (no icon library), three runtime deps total
+  (`next`, `react`, `react-dom`).
+- Dynamic `app/sitemap.ts` enumerates static pages + every seller +
+  every service from the registry. Permissive `public/robots.txt`.
+- New scripts in root `package.json`: `web`, `web:start`,
+  `test:phase7`.
+- ADR 0012 — public web index (Next.js + RSC; 7 pages defended over
+  the original 3; 60s revalidate on lists, no-store on detail; port
+  3300; sitemap + permissive robots).
+- Phase 7 test gate (`scripts/test-phase7.js`) — PASS · 14/14.
+  Spawns `next start` against the live registry, verifies all 7 page
+  types return 200 with expected markers, both 404 paths return 404
+  (not 500), `/sitemap.xml` and `/robots.txt` serve, and
+  `npm --workspace=web run build` exits clean.
+
 ### Phase 6 — Dataset seller + platform fee (2026-04-26)
 
 - New workspace `agents/dataset-seller/` (port 3200). Sells one

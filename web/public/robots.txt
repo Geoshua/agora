@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+# Andromeda public web index. All routes are read-only and public.
+# Sitemap is generated dynamically from the registry.
+Sitemap: /sitemap.xml
