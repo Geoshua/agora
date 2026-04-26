@@ -3,8 +3,8 @@
 
 import { submitReview } from "@/lib/reviews";
 import { verifySignedRequest, readBody } from "@/lib/sig";
-import { validateReviewSubmission, rollupScore } from "@andromeda/core";
-import type { ReviewRubricField } from "@andromeda/core";
+import { validateReviewSubmission, rollupScore } from "@agora/core";
+import type { ReviewRubricField } from "@agora/core";
 
 export const dynamic = "force-dynamic";
 

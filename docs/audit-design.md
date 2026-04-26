@@ -1,5 +1,9 @@
 # Andromeda — design audit
 
+> **Historical note:** This audit was written under the project's
+> previous name. The codebase is now branded **Agora** (see ADR 0013).
+> Findings below are still applicable; only the brand changed.
+
 Independent paper review. No code changes. Reviewer had no prior context;
 findings are based on `README.md`, `PAYMYAGENT.md`, `docs/decisions/0001..0010`,
 `docs/BUILD-SUMMARY.md`, `CHANGELOG.md`, and a targeted read of the source.

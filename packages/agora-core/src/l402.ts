@@ -1,5 +1,5 @@
 // L402 macaroon mint / verify primitives — extracted from
-// provider/src/lib/l402.ts so any Andromeda seller agent can mint
+// provider/src/lib/l402.ts so any Agora seller agent can mint
 // macaroons in the same format.
 //
 // The HMAC format is FROZEN: base64url(json).hmac256.

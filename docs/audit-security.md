@@ -1,5 +1,9 @@
 # Andromeda — security audit
 
+> **Historical note:** This audit was written under the project's
+> previous name. The codebase is now branded **Agora** (see ADR 0013).
+> Findings below are still applicable; only the brand changed.
+
 Independent security review. Auditor had no prior context. Methodology:
 read `README.md`, `PAYMYAGENT.md`, `docs/BUILD-SUMMARY.md`, every ADR in
 `docs/decisions/`, then read source for every endpoint that mints a

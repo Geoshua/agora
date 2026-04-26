@@ -1,15 +1,15 @@
 {
-  "name": "@andromeda/dataset-seller",
-  "version": "0.1.0",
+  "name": "@agora/dataset-seller",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda dataset-seller — sells data products with signed-URL delivery.",
+  "description": "Agora dataset-seller — sells data products with signed-URL delivery.",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js"
   },
   "dependencies": {
-    "@andromeda/core": "*",
+    "@agora/core": "*",
     "better-sqlite3": "^12.9.0"
   }
 }

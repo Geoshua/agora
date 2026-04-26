@@ -1,8 +1,11 @@
-// Thin registry HTTP client used by the MCP server.
-// Reads only — no signed writes from the MCP yet.
-// (Buyer-side signed actions like rate_seller come in Phase 5.)
+// Thin Agora registry HTTP client used by the MCP server.
+// Reads + buyer-side signed writes (rate_seller, reviews, etc.).
 
-const REGISTRY = process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030";
+const REGISTRY =
+  process.env.AGORA_REGISTRY_URL ??
+  process.env.ANDROMEDA_REGISTRY_URL ??
+  process.env.LUMEN_REGISTRY_URL ??
+  "http://localhost:3030";
 
 async function getJson(path) {
   const r = await fetch(`${REGISTRY}${path}`);
@@ -51,7 +54,8 @@ export async function recommend(body) {
 }
 
 // ─── signed POST helper for buyer-side reviews ──────────────────────
-import { signRequest } from "@andromeda/core";
+// signRequest emits canonical X-Agora-* headers (ADR 0013).
+import { signRequest } from "@agora/core";
 
 export async function signedPost(path, body, identity) {
   const raw = JSON.stringify(body);

@@ -1,15 +1,15 @@
 {
-  "name": "@andromeda/market-monitor",
-  "version": "0.1.0",
+  "name": "@agora/market-monitor",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda market-monitor seller — sells github-advisory-monitor as a sat-per-event subscription.",
+  "description": "Agora market-monitor seller — sells github-advisory-monitor as a sat-per-event subscription.",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js"
   },
   "dependencies": {
-    "@andromeda/core": "*",
+    "@agora/core": "*",
     "better-sqlite3": "^12.9.0"
   }
 }

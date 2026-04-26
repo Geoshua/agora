@@ -1,5 +1,8 @@
 # ADR 0012 — Public web index
 
+> **Note (post-ADR 0013):** "Andromeda" branding below is now "Agora".
+> The Next.js + RSC + 7-pages design (port 3300) is unchanged.
+
 Status: Accepted
 Date: 2026-04-26
 

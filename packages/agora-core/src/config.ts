@@ -1,4 +1,4 @@
-// Andromeda — central constants. Defaults are intentionally
+// Agora — central constants. Defaults are intentionally
 // conservative; every component can override via env vars.
 
 export const DEFAULTS = {

@@ -16,7 +16,11 @@ type Body = {
   evidence?: Record<string, unknown>;
 };
 
-const SIGNING_SECRET = process.env.ANDROMEDA_REGISTRY_SECRET ?? process.env.L402_SECRET ?? "registry-default-secret-please-set-something-stronger";
+const SIGNING_SECRET =
+  process.env.AGORA_REGISTRY_SECRET ??
+  process.env.ANDROMEDA_REGISTRY_SECRET ??
+  process.env.L402_SECRET ??
+  "registry-default-secret-please-set-something-stronger";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

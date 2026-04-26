@@ -21,6 +21,9 @@ export async function GET() {
     rev: "v0.3.0",
     wallet_mode: wallet().kind,
     price_sats: parseInt(process.env.PRICE_SATS ?? "240", 10),
+    // Canonical key: agora_pubkey. Legacy `andromeda_pubkey` is kept on
+    // the response for one rebrand cycle (ADR 0013).
+    agora_pubkey: id?.pubkey ?? null,
     andromeda_pubkey: id?.pubkey ?? null,
     persistence: { invoices, receipts },
     endpoints: [

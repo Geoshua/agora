@@ -10,7 +10,7 @@ export async function GET() {
   } catch { dbOk = false; }
   return Response.json({
     ok: true,
-    service: "andromeda-registry",
+    service: "agora-registry",
     rev: "v0.1.0",
     db: dbOk ? "ok" : "down",
     endpoints: [

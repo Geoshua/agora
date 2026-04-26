@@ -1,5 +1,9 @@
 # ADR 0011 — Dashboard implementation: Vite SPA + control-plane proxy
 
+> **Note (post-ADR 0013):** "Andromeda dashboard" / `~/.andromeda/`
+> below are now "Agora dashboard" / `~/.agora/`. The SPA + proxy
+> architecture is unchanged.
+
 Status: Accepted
 Date: 2026-04-26
 

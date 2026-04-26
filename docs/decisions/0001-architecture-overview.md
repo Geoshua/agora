@@ -3,6 +3,12 @@
 Status: Accepted
 Date: 2026-04-26
 
+> **Note (2026-04-26, post-ADR 0013):** "Andromeda" in this document
+> refers to the codebase that is now branded **Agora**. The architecture
+> described here is unchanged. The signed-call header family is
+> `X-Agora-*` canonical (with `X-Andromeda-*` and `X-Lumen-*` accepted
+> as deprecated aliases). See ADR 0013 for the rebrand details.
+
 ## Context
 
 LUMEN began as a single-provider, single-buyer L402 demo for the SPIRAL ×

@@ -1,8 +1,11 @@
-// Typed fetcher for the Andromeda registry's public REST endpoints.
+// Typed fetcher for the Agora registry's public REST endpoints.
 // All functions are server-side. No client API surface here.
 
 export const REGISTRY_URL =
-  process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030";
+  process.env.AGORA_REGISTRY_URL ??
+  process.env.ANDROMEDA_REGISTRY_URL ??
+  process.env.LUMEN_REGISTRY_URL ??
+  "http://localhost:3030";
 
 export type Seller = {
   pubkey: string;

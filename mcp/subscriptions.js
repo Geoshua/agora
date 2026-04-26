@@ -2,22 +2,21 @@
 // so subsequent check_alerts calls don't have to look up the seller
 // each time.
 //
-// Persists to ~/.andromeda/subscriptions.json (per-user state).
+// Persists to ~/.agora/subscriptions.json (per-user state). On first
+// read, contents from ~/.andromeda/ are migrated over (ADR 0013).
 
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { stateDir } from "./state-dir.js";
 
-const STATE_DIR = process.env.ANDROMEDA_STATE_DIR ?? path.join(os.homedir(), ".andromeda");
-const STATE_FILE = path.join(STATE_DIR, "subscriptions.json");
+function stateFile() { return `${stateDir()}/subscriptions.json`; }
 
-function ensureDir() { try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch {} }
+function ensureDir() { try { fs.mkdirSync(stateDir(), { recursive: true }); } catch {} }
 function load() {
-  try { return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch { return {}; }
+  try { return JSON.parse(fs.readFileSync(stateFile(), "utf8")); } catch { return {}; }
 }
 function save(state) {
   ensureDir();
-  try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch {}
+  try { fs.writeFileSync(stateFile(), JSON.stringify(state, null, 2)); } catch {}
 }
 
 export function remember(subscription_id, info) {

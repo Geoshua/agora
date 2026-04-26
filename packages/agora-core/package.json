@@ -1,9 +1,9 @@
 {
-  "name": "@andromeda/core",
-  "version": "0.1.0",
+  "name": "@agora/core",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda shared core — identity, signed-requests, types, l402 helpers.",
+  "description": "Agora shared core — identity, signed-requests, types, l402 helpers, env + state-dir helpers.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -34,6 +34,14 @@
     "./review-rubric": {
       "import": "./dist/review-rubric.js",
       "types": "./dist/review-rubric.d.ts"
+    },
+    "./env": {
+      "import": "./dist/env.js",
+      "types": "./dist/env.d.ts"
+    },
+    "./state-dir": {
+      "import": "./dist/state-dir.js",
+      "types": "./dist/state-dir.d.ts"
     }
   },
   "scripts": {

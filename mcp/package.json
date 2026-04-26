@@ -1,9 +1,9 @@
 {
   "name": "lumen-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "PayMyAgent — MCP server that lets Claude (or any MCP host) hire LUMEN providers for sats.",
+  "description": "PayMyAgent — MCP server that lets Claude (or any MCP host) hire Agora providers for sats.",
   "bin": {
     "lumen-mcp": "server.js"
   },
@@ -11,7 +11,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@andromeda/core": "*",
+    "@agora/core": "*",
     "@getalby/sdk": "^7.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.4.2",

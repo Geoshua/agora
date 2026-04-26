@@ -35,7 +35,7 @@ export function Transactions() {
           <tbody>
             {transactions.length === 0 && !loading && (
               <tr><td colSpan={5} className="px-3 py-4 text-center text-zinc-500">
-                No transactions logged at <code className="font-mono">~/.andromeda/transactions.log</code>.
+                No transactions logged at <code className="font-mono">~/.agora/transactions.log</code>.
               </td></tr>
             )}
             {transactions.map((t, i) => (

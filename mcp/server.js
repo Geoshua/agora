@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 // ─────────────────────────────────────────────────────────────────────
-//  Andromeda (formerly LUMEN) MCP server — PayMyAgent.
+//  Agora (formerly Andromeda, formerly LUMEN) MCP server — PayMyAgent.
 //
 //  Exposes a set of tools to any MCP host (Claude Desktop, Cursor,
 //  Claude Code, etc.) so a human can hand the agent a Lightning wallet
-//  + a sat budget and let it spend per task on Andromeda providers.
+//  + a sat budget and let it spend per task on Agora providers.
 //
-//  All seven legacy `lumen_*` tools are kept registered as DEPRECATED
-//  ALIASES that delegate to the canonical `andromeda_*` names. New
-//  tools are only registered under `andromeda_*` (search_services,
-//  list_sellers, discover_all).
+//  Per ADR 0013 (final rebrand to Agora), every tool is registered
+//  under THREE names:
+//    • canonical: `agora_*`
+//    • deprecated alias: `andromeda_*` (was canonical pre-ADR 0013)
+//    • deprecated alias: `lumen_*`     (was canonical pre-ADR 0002)
+//  All three resolve to the same handler. Newer registry-only tools
+//  introduced in Phase 1+ are only registered under `agora_*` (with
+//  `andromeda_*` as a one-rebrand-back deprecated alias).
 //
-//  All paid tools route through lumen-client.js, which honours the
-//  budget guardrail (budget.js) and the per-call cap (MAX_PRICE_SATS).
+//  All paid tools route through lumen-client.js (file name unchanged
+//  for path-stability), which honours the budget guardrail (budget.js)
+//  and the per-call cap (MAX_PRICE_SATS).
 // ─────────────────────────────────────────────────────────────────────
 
 import "dotenv/config";
@@ -29,6 +34,7 @@ import * as registry from "./registry-client.js";
 import * as subs from "./subscriptions.js";
 import { ensureBuyerIdentity, tryBuyerIdentity } from "./identity.js";
 import { startControlPlane, stopControlPlane } from "./control-plane.js";
+import { stateDir, stateDirPath } from "./state-dir.js";
 
 // ─── helpers ──────────────────────────────────────────────────────────
 const ok = (data) => ({
@@ -42,31 +48,33 @@ const fail = (message, extra = {}) => ({
 });
 
 // ─── server ───────────────────────────────────────────────────────────
-const server = new McpServer({ name: "andromeda-paymyagent", version: "0.2.0" });
+const server = new McpServer({ name: "agora-paymyagent", version: "0.3.0" });
 
-// Each handler is a plain async fn; we register it under both names.
-function registerWithAlias(name, alias, def, handler) {
-  // Canonical (andromeda_*).
-  server.registerTool(name, def, handler);
-  // Legacy (lumen_*) — same handler, deprecated description.
-  if (alias) {
+// Each handler is a plain async fn; we register it under canonical
+// `agora_*` plus any number of deprecated aliases that delegate to
+// the same handler. Each alias gets its description prefixed with a
+// deprecated marker so MCP hosts can surface the warning.
+function registerWithAliases(canonical, aliases, def, handler) {
+  server.registerTool(canonical, def, handler);
+  for (const alias of aliases) {
+    if (!alias) continue;
     server.registerTool(alias, {
       ...def,
       title: def.title,
-      description: `[deprecated alias of ${name} — will be removed in a future release] ${def.description}`,
+      description: `[deprecated alias of ${canonical} — will be removed in a future release] ${def.description}`,
     }, handler);
   }
 }
 
-// ─── andromeda_status (alias: lumen_status) ───────────────────────────
-registerWithAlias(
-  "andromeda_status",
-  "lumen_status",
+// ─── agora_status (aliases: andromeda_status, lumen_status) ───────────
+registerWithAliases(
+  "agora_status",
+  ["andromeda_status", "lumen_status"],
   {
-    title: "Andromeda status",
+    title: "Agora status",
     description:
-      "Returns the connected Andromeda provider URL, wallet mode (mock|real), per-call cap, " +
-      "remaining sat budget, registry URL, and the buyer's Andromeda public key. " +
+      "Returns the connected Agora provider URL, wallet mode (mock|real), per-call cap, " +
+      "remaining sat budget, registry URL, and the buyer's Agora public key. " +
       "Always-free; call this first if unsure of cost or capacity.",
     inputSchema: {},
   },
@@ -88,16 +96,16 @@ registerWithAlias(
   },
 );
 
-// ─── andromeda_discover (alias: lumen_discover) ───────────────────────
-registerWithAlias(
-  "andromeda_discover",
-  "lumen_discover",
+// ─── agora_discover (aliases: andromeda_discover, lumen_discover) ─────
+registerWithAliases(
+  "agora_discover",
+  ["andromeda_discover", "lumen_discover"],
   {
-    title: "Andromeda discover (single provider)",
+    title: "Agora discover (single provider)",
     description:
-      "Lists every paid service the connected Andromeda provider sells (price, p50 latency, request schema). " +
+      "Lists every paid service the connected Agora provider sells (price, p50 latency, request schema). " +
       "Always-free; safe to call before deciding what to buy. " +
-      "For a multi-provider catalog, use andromeda_discover_all.",
+      "For a multi-provider catalog, use agora_discover_all.",
     inputSchema: {},
   },
   async () => {
@@ -106,24 +114,24 @@ registerWithAlias(
   },
 );
 
-// ─── andromeda_balance (alias: lumen_balance) ─────────────────────────
-registerWithAlias(
-  "andromeda_balance",
-  "lumen_balance",
+// ─── agora_balance (aliases: andromeda_balance, lumen_balance) ────────
+registerWithAliases(
+  "agora_balance",
+  ["andromeda_balance", "lumen_balance"],
   {
-    title: "Andromeda balance",
+    title: "Agora balance",
     description: "Reports the current Lightning wallet balance (via NWC). Free to call.",
     inputSchema: {},
   },
   async () => ok({ wallet: await balance() }),
 );
 
-// ─── andromeda_set_budget (alias: lumen_set_budget) ───────────────────
-registerWithAlias(
-  "andromeda_set_budget",
-  "lumen_set_budget",
+// ─── agora_set_budget (aliases: andromeda_set_budget, lumen_set_budget)
+registerWithAliases(
+  "agora_set_budget",
+  ["andromeda_set_budget", "lumen_set_budget"],
   {
-    title: "Andromeda set budget",
+    title: "Agora set budget",
     description:
       "Reset the per-session spending cap (in sats). Resets the 'spent' counter to 0. " +
       "Use this at the start of a task to give the agent an explicit budget; once exceeded, paid tools refuse.",
@@ -137,16 +145,16 @@ registerWithAlias(
   },
 );
 
-// ─── andromeda_verify_listing (alias: lumen_verify_listing) ───────────
-registerWithAlias(
-  "andromeda_verify_listing",
-  "lumen_verify_listing",
+// ─── agora_verify_listing (aliases: andromeda_, lumen_) ───────────────
+registerWithAliases(
+  "agora_verify_listing",
+  ["andromeda_verify_listing", "lumen_verify_listing"],
   {
-    title: "Andromeda — verify listing",
+    title: "Agora — verify listing",
     description:
-      "Pays the connected Andromeda provider (typically 240 sat) to verify a place exists on OpenStreetMap. " +
+      "Pays the connected Agora provider (typically 240 sat) to verify a place exists on OpenStreetMap. " +
       "Returns real coordinates, the resolved place name, an OSM id, and an HMAC-signed proof. " +
-      "Spends real Lightning sats unless MOCK_MODE=true. Use andromeda_status to confirm cost first.",
+      "Spends real Lightning sats unless MOCK_MODE=true. Use agora_status to confirm cost first.",
     inputSchema: {
       listing: z.string().min(2).describe("Place name, e.g. 'Hotel Adlon Berlin', 'Eiffel Tower Paris'"),
       date:    z.string().describe("ISO-8601 date (YYYY-MM-DD) for the listing's intended use"),
@@ -161,14 +169,14 @@ registerWithAlias(
   },
 );
 
-// ─── andromeda_file_receipt (alias: lumen_file_receipt) ───────────────
-registerWithAlias(
-  "andromeda_file_receipt",
-  "lumen_file_receipt",
+// ─── agora_file_receipt (aliases: andromeda_, lumen_) ─────────────────
+registerWithAliases(
+  "agora_file_receipt",
+  ["andromeda_file_receipt", "lumen_file_receipt"],
   {
-    title: "Andromeda — file receipt",
+    title: "Agora — file receipt",
     description:
-      "Pays the connected Andromeda provider (typically 120 sat) to mint a signed delivery receipt for an order. " +
+      "Pays the connected Agora provider (typically 120 sat) to mint a signed delivery receipt for an order. " +
       "Pass the bolt-11 of the original purchase + an order_id; the provider extracts amount/network/payment_hash, " +
       "signs a claims envelope, and stores it for replay.",
     inputSchema: {
@@ -186,17 +194,17 @@ registerWithAlias(
   },
 );
 
-// ─── andromeda_fetch_receipt (alias: lumen_fetch_receipt) ─────────────
-registerWithAlias(
-  "andromeda_fetch_receipt",
-  "lumen_fetch_receipt",
+// ─── agora_fetch_receipt (aliases: andromeda_, lumen_) ────────────────
+registerWithAliases(
+  "agora_fetch_receipt",
+  ["andromeda_fetch_receipt", "lumen_fetch_receipt"],
   {
-    title: "Andromeda — fetch receipt",
+    title: "Agora — fetch receipt",
     description:
       "Free replayable read of a receipt the agent has already paid to mint. Returns the same signed claims envelope; " +
       "signature must validate against the provider's L402_SECRET.",
     inputSchema: {
-      receipt_id: z.string().min(1).describe("The rcpt_… id returned by andromeda_file_receipt"),
+      receipt_id: z.string().min(1).describe("The rcpt_… id returned by agora_file_receipt"),
     },
   },
   async ({ receipt_id }) => {
@@ -205,13 +213,14 @@ registerWithAlias(
   },
 );
 
-// ─── andromeda_search_services (NEW — registry-backed) ────────────────
-server.registerTool(
-  "andromeda_search_services",
+// ─── agora_search_services (alias: andromeda_search_services) ─────────
+registerWithAliases(
+  "agora_search_services",
+  ["andromeda_search_services"],
   {
-    title: "Andromeda — search services across all sellers",
+    title: "Agora — search services across all sellers",
     description:
-      "Search the Andromeda registry for services matching a free-text query. " +
+      "Search the Agora registry for services matching a free-text query. " +
       "Optionally filter by max price (sats) and type (verification|monitoring|dataset|compute|audit|other). " +
       "Returns a ranked list of matching services from any registered seller. Free.",
     inputSchema: {
@@ -228,13 +237,14 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_list_sellers (NEW) ─────────────────────────────────────
-server.registerTool(
-  "andromeda_list_sellers",
+// ─── agora_list_sellers (alias: andromeda_list_sellers) ───────────────
+registerWithAliases(
+  "agora_list_sellers",
+  ["andromeda_list_sellers"],
   {
-    title: "Andromeda — list registered sellers",
+    title: "Agora — list registered sellers",
     description:
-      "Lists every seller registered in the Andromeda registry, with pubkey, name, URL, honor, and last-active timestamp. Free.",
+      "Lists every seller registered in the Agora registry, with pubkey, name, URL, honor, and last-active timestamp. Free.",
     inputSchema: {
       limit: z.number().int().positive().max(200).optional(),
       offset: z.number().int().nonnegative().optional(),
@@ -254,14 +264,15 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_discover_all (NEW — multi-provider catalog) ────────────
-server.registerTool(
-  "andromeda_discover_all",
+// ─── agora_discover_all (alias: andromeda_discover_all) ───────────────
+registerWithAliases(
+  "agora_discover_all",
+  ["andromeda_discover_all"],
   {
-    title: "Andromeda — discover all services across all providers",
+    title: "Agora — discover all services across all providers",
     description:
-      "Returns the full catalog of services across every registered Andromeda provider, optionally filtered " +
-      "by type, tag, or max price. For single-provider discovery use andromeda_discover. Free.",
+      "Returns the full catalog of services across every registered Agora provider, optionally filtered " +
+      "by type, tag, or max price. For single-provider discovery use agora_discover. Free.",
     inputSchema: {
       type: z.string().optional(),
       tag: z.string().optional(),
@@ -276,18 +287,19 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_subscribe (NEW — Phase 2) ──────────────────────────────
-server.registerTool(
-  "andromeda_subscribe",
+// ─── agora_subscribe (alias: andromeda_subscribe) ─────────────────────
+registerWithAliases(
+  "agora_subscribe",
+  ["andromeda_subscribe"],
   {
-    title: "Andromeda — subscribe to a sat-per-event service",
+    title: "Agora — subscribe to a sat-per-event service",
     description:
       "Open a prepaid subscription with a seller (e.g. market-monitor's github-advisory-monitor). " +
       "Pay a deposit upfront; each delivered alert debits per_event_sats from balance. " +
       "Returns a subscription_id you'll use for check_alerts / topup / cancel. " +
-      "Use andromeda_search_services with type='monitoring' to find subscribable sellers.",
+      "Use agora_search_services with type='monitoring' to find subscribable sellers.",
     inputSchema: {
-      seller_pubkey: z.string().min(1).describe("Seller's Ed25519 pubkey (hex), from andromeda_list_sellers"),
+      seller_pubkey: z.string().min(1).describe("Seller's Ed25519 pubkey (hex), from agora_list_sellers"),
       service_local_id: z.string().min(1).describe("Local service id at the seller (e.g. 'github-advisory-monitor')"),
       deposit_sats: z.number().int().positive().describe("Initial sats to deposit"),
       per_event_sats: z.number().int().positive().optional().describe("Sats charged per delivered event (default seller's)"),
@@ -326,11 +338,12 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_list_subscriptions (NEW) ───────────────────────────────
-server.registerTool(
-  "andromeda_list_subscriptions",
+// ─── agora_list_subscriptions (alias: andromeda_list_subscriptions) ──
+registerWithAliases(
+  "agora_list_subscriptions",
+  ["andromeda_list_subscriptions"],
   {
-    title: "Andromeda — list subscriptions",
+    title: "Agora — list subscriptions",
     description: "Lists active subscriptions tracked by this MCP session (cached locally). Free.",
     inputSchema: {},
   },
@@ -353,11 +366,12 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_check_alerts (NEW) ─────────────────────────────────────
-server.registerTool(
-  "andromeda_check_alerts",
+// ─── agora_check_alerts (alias: andromeda_check_alerts) ───────────────
+registerWithAliases(
+  "agora_check_alerts",
+  ["andromeda_check_alerts"],
   {
-    title: "Andromeda — poll subscription alerts",
+    title: "Agora — poll subscription alerts",
     description:
       "Fetches new alerts for a subscription since the last poll. Updates the local 'last_seen_alert_ms' watermark so subsequent calls are incremental. Free.",
     inputSchema: {
@@ -381,11 +395,12 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_topup_subscription (NEW) ───────────────────────────────
-server.registerTool(
-  "andromeda_topup_subscription",
+// ─── agora_topup_subscription (alias: andromeda_topup_subscription) ───
+registerWithAliases(
+  "agora_topup_subscription",
+  ["andromeda_topup_subscription"],
   {
-    title: "Andromeda — top up a subscription",
+    title: "Agora — top up a subscription",
     description:
       "Add sats to a subscription's balance. In mock mode, no actual payment moves; in real mode the seller will issue an L402 challenge.",
     inputSchema: {
@@ -410,11 +425,12 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_cancel_subscription (NEW) ──────────────────────────────
-server.registerTool(
-  "andromeda_cancel_subscription",
+// ─── agora_cancel_subscription (alias: andromeda_cancel_subscription) ─
+registerWithAliases(
+  "agora_cancel_subscription",
+  ["andromeda_cancel_subscription"],
   {
-    title: "Andromeda — cancel a subscription",
+    title: "Agora — cancel a subscription",
     description: "Cancel an active subscription. In mock mode the unused balance is returned to the buyer's session counter.",
     inputSchema: { subscription_id: z.string().min(1) },
   },
@@ -431,14 +447,15 @@ server.registerTool(
   },
 );
 
-// ─── andromeda_recommend (NEW — Phase 4 orchestrator) ───────────────
-server.registerTool(
-  "andromeda_recommend",
+// ─── agora_recommend (alias: andromeda_recommend) ─────────────────────
+registerWithAliases(
+  "agora_recommend",
+  ["andromeda_recommend"],
   {
-    title: "Andromeda — orchestrator recommends services for an intent",
+    title: "Agora — orchestrator recommends services for an intent",
     description:
       "Given a free-text intent (e.g. 'watch for security problems in the code we ship'), " +
-      "the orchestrator ranks every registered Andromeda service by intent match (60%), " +
+      "the orchestrator ranks every registered Agora service by intent match (60%), " +
       "honor (20%), and price fit (20%). Returns ranked results with explainable per-factor scores. " +
       "Optionally filter by max_price_sats, min_honor, or type. Free.",
     inputSchema: {
@@ -464,10 +481,11 @@ server.registerTool(
 
 // ─── Phase 5 — honor & peer review tools ─────────────────────────────
 
-server.registerTool(
-  "andromeda_rate_seller",
+registerWithAliases(
+  "agora_rate_seller",
+  ["andromeda_rate_seller"],
   {
-    title: "Andromeda — rate a seller (1..5)",
+    title: "Agora — rate a seller (1..5)",
     description:
       "Submit a 1-5 star rating for a seller you've recently transacted with (within 30 days). " +
       "Buyer-signed; the registry verifies the buyer's signature against transactions in its ledger.",
@@ -486,10 +504,11 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "andromeda_request_review",
+registerWithAliases(
+  "agora_request_review",
+  ["andromeda_request_review"],
   {
-    title: "Andromeda — request peer review of a service (seller-side)",
+    title: "Agora — request peer review of a service (seller-side)",
     description:
       "Open a peer-review request. Pays an escrow (held by the registry); registry blindly assigns a random reviewer. " +
       "On honest review submission, the reviewer gets escrow minus 5% platform cut. On dispute, the reviewer is slashed " +
@@ -510,10 +529,11 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "andromeda_set_reviewer_availability",
+registerWithAliases(
+  "agora_set_reviewer_availability",
+  ["andromeda_set_reviewer_availability"],
   {
-    title: "Andromeda — flip reviewer availability",
+    title: "Agora — flip reviewer availability",
     description:
       "Mark the buyer/reviewer (this MCP's identity) as available or unavailable for blind review assignment. " +
       "When available, the registry may pick this pubkey for future review requests.",
@@ -529,10 +549,11 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "andromeda_check_review_assignments",
+registerWithAliases(
+  "agora_check_review_assignments",
+  ["andromeda_check_review_assignments"],
   {
-    title: "Andromeda — list pending review assignments",
+    title: "Agora — list pending review assignments",
     description: "Returns review requests assigned to this MCP's identity that are still pending submission.",
     inputSchema: {},
   },
@@ -545,10 +566,11 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "andromeda_submit_review",
+registerWithAliases(
+  "agora_submit_review",
+  ["andromeda_submit_review"],
   {
-    title: "Andromeda — submit a peer review",
+    title: "Agora — submit a peer review",
     description:
       "Submit a rubric-scored review for a request you were assigned. Scores are 0..5 across six fields. " +
       "Objective fields (correctness, latency, uptime, spec_compliance) require justification (≥5 chars). " +
@@ -580,17 +602,17 @@ server.registerTool(
 // ─── Phase 6 — dataset tools ──────────────────────────────────────────
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-const DATASETS_DIR = path.join(os.homedir(), ".andromeda", "datasets");
+const DATASETS_DIR = stateDirPath("datasets");
 
-server.registerTool(
-  "andromeda_browse_datasets",
+registerWithAliases(
+  "agora_browse_datasets",
+  ["andromeda_browse_datasets"],
   {
-    title: "Andromeda — browse datasets",
+    title: "Agora — browse datasets",
     description:
-      "Lists all type=dataset services across registered Andromeda sellers, with provenance, " +
+      "Lists all type=dataset services across registered Agora sellers, with provenance, " +
       "row count, size, and a free preview endpoint. Free.",
     inputSchema: {},
   },
@@ -602,13 +624,14 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "andromeda_purchase_dataset",
+registerWithAliases(
+  "agora_purchase_dataset",
+  ["andromeda_purchase_dataset"],
   {
-    title: "Andromeda — purchase a dataset",
+    title: "Agora — purchase a dataset",
     description:
       "Pays the L402 paywall for a dataset, downloads it via the signed URL the seller returns, " +
-      "and writes it to ~/.andromeda/datasets/<dataset_id>. Spends sats unless MOCK_MODE=true.",
+      "and writes it to ~/.agora/datasets/<dataset_id>. Spends sats unless MOCK_MODE=true.",
     inputSchema: {
       seller_pubkey: z.string().min(1),
       dataset_id: z.string().min(1),
@@ -623,7 +646,8 @@ server.registerTool(
       // We need a one-off paid call to a different host. Inline implement.
       const purchasePath = `/api/v1/dataset/${encodeURIComponent(dataset_id)}/purchase`;
       const id = tryBuyerIdentity();
-      const buyerHeader = id ? { "x-andromeda-pubkey": id.pubkey } : {};
+      // Canonical buyer-pubkey header is x-agora-pubkey (ADR 0013).
+      const buyerHeader = id ? { "x-agora-pubkey": id.pubkey } : {};
 
       const r = await fetch(`${sellerUrl}${purchasePath}`, {
         method: "POST", headers: { "content-type": "application/json", ...buyerHeader },
@@ -695,11 +719,12 @@ server.registerTool(
   },
 );
 
-server.registerTool(
-  "andromeda_list_datasets",
+registerWithAliases(
+  "agora_list_datasets",
+  ["andromeda_list_datasets"],
   {
-    title: "Andromeda — list locally-saved datasets",
-    description: "Lists files under ~/.andromeda/datasets/. Free.",
+    title: "Agora — list locally-saved datasets",
+    description: "Lists files under ~/.agora/datasets/. Free.",
     inputSchema: {},
   },
   async () => {
@@ -720,29 +745,34 @@ server.registerTool(
 // ─── connect ──────────────────────────────────────────────────────────
 async function main() {
   // Generate buyer keypair if missing. We await this so paid tools
-  // can attach the X-Andromeda-Pubkey header (lets the registry
+  // can attach the X-Agora-Pubkey header (lets the registry
   // attribute transactions to a buyer for the rate path).
   try { await ensureBuyerIdentity(); }
   catch (e) {
-    process.stderr.write(`[andromeda-mcp] identity init failed: ${e.message}\n`);
+    process.stderr.write(`[agora-mcp] identity init failed: ${e.message}\n`);
   }
 
   // Start the localhost control plane unless explicitly disabled.
-  // Tests / CI can pass ANDROMEDA_CONTROL_PLANE=off to skip.
-  if (process.env.ANDROMEDA_CONTROL_PLANE !== "off") {
+  // Tests / CI can pass AGORA_CONTROL_PLANE=off (or legacy
+  // ANDROMEDA_CONTROL_PLANE=off) to skip.
+  const controlPlaneFlag =
+    process.env.AGORA_CONTROL_PLANE ??
+    process.env.ANDROMEDA_CONTROL_PLANE ??
+    process.env.LUMEN_CONTROL_PLANE;
+  if (controlPlaneFlag !== "off") {
     try { await startControlPlane(); }
-    catch (e) { process.stderr.write(`[andromeda-mcp] control-plane failed: ${e.message}\n`); }
+    catch (e) { process.stderr.write(`[agora-mcp] control-plane failed: ${e.message}\n`); }
   }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write(`[andromeda-mcp] ready · provider=${PROVIDER} mode=${MOCK ? "mock" : "real"} budget=${budgetStatus().budget_sats} sat\n`);
+  process.stderr.write(`[agora-mcp] ready · provider=${PROVIDER} mode=${MOCK ? "mock" : "real"} budget=${budgetStatus().budget_sats} sat · state=${stateDir()}\n`);
 }
 
 process.on("SIGINT",  () => { stopControlPlane(); close(); process.exit(0); });
 process.on("SIGTERM", () => { stopControlPlane(); close(); process.exit(0); });
 
 main().catch((err) => {
-  process.stderr.write(`[andromeda-mcp] fatal: ${err.message}\n`);
+  process.stderr.write(`[agora-mcp] fatal: ${err.message}\n`);
   process.exit(1);
 });

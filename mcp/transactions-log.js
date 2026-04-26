@@ -1,4 +1,4 @@
-// Append-only transaction log at ~/.andromeda/transactions.log (JSONL).
+// Append-only transaction log at ~/.agora/transactions.log (JSONL).
 //
 // Each line is one JSON object. Columns:
 //   ts_ms         number  wall-clock ms when the spend was confirmed
@@ -10,16 +10,16 @@
 //   note          string? free-text annotation
 //
 // File is created on first append (no migration, no schema). The dashboard
-// reads it via the control plane (GET /transactions).
+// reads it via the control plane (GET /transactions). State dir resolution
+// (~/.agora/ canonical, with one-shot migration from ~/.andromeda/) is in
+// state-dir.js — see ADR 0013.
 
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { stateDir } from "./state-dir.js";
 
-const STATE_DIR = process.env.ANDROMEDA_STATE_DIR ?? path.join(os.homedir(), ".andromeda");
-const LOG_FILE = path.join(STATE_DIR, "transactions.log");
+function logFile() { return `${stateDir()}/transactions.log`; }
 
-function ensureDir() { try { fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 }); } catch {} }
+function ensureDir() { try { fs.mkdirSync(stateDir(), { recursive: true, mode: 0o700 }); } catch {} }
 
 export function appendTransaction(entry) {
   ensureDir();
@@ -30,7 +30,7 @@ export function appendTransaction(entry) {
     ...entry,
   };
   try {
-    fs.appendFileSync(LOG_FILE, JSON.stringify(row) + "\n", { mode: 0o600 });
+    fs.appendFileSync(logFile(), JSON.stringify(row) + "\n", { mode: 0o600 });
   } catch (e) {
     // best-effort; log to stderr but never throw
     process.stderr.write(`[transactions-log] WARN couldn't append: ${e.message}\n`);
@@ -42,8 +42,9 @@ export function readTransactions(opts = {}) {
   const { limit = 1000 } = opts;
   ensureDir();
   let raw = "";
-  try { raw = fs.readFileSync(LOG_FILE, "utf8"); }
-  catch { try { fs.writeFileSync(LOG_FILE, "", { mode: 0o600 }); } catch {} ; return []; }
+  const fp = logFile();
+  try { raw = fs.readFileSync(fp, "utf8"); }
+  catch { try { fs.writeFileSync(fp, "", { mode: 0o600 }); } catch {} ; return []; }
   const lines = raw.split(/\r?\n/).filter(Boolean);
   const out = [];
   // Read tail-first; oldest at the bottom.
@@ -53,4 +54,4 @@ export function readTransactions(opts = {}) {
   return out;
 }
 
-export function transactionsLogPath() { return LOG_FILE; }
+export function transactionsLogPath() { return logFile(); }

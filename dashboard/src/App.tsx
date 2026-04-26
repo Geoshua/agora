@@ -20,7 +20,7 @@ export default function App() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
             <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
-            <h1 className="text-sm font-bold tracking-wide">Andromeda</h1>
+            <h1 className="text-sm font-bold tracking-wide">Agora</h1>
             <span className="text-[11px] text-zinc-500 font-mono">{config.baseUrl}</span>
           </div>
           <button
@@ -43,7 +43,7 @@ export default function App() {
       </main>
 
       <footer className="mx-auto max-w-6xl px-6 pb-6 text-[11px] text-zinc-500">
-        Andromeda Phase 3-UI · single localhost client · ADR 0011
+        Agora Phase 3-UI · single localhost client · ADR 0011
       </footer>
     </div>
   );

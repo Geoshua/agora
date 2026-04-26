@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// ─── Phase 1 (Andromeda multi-seller) test gate ────────────────────────
+// ─── Phase 1 (Agora multi-seller) test gate ────────────────────────────
 //
 // Spins up the registry + the existing provider, verifies that:
 //   1. registry boots
 //   2. provider self-registers with valid Ed25519 sig
 //   3. registry lists the seller and their services
 //   4. /v1/services and /v1/services/search return expected shapes
-//   5. tampered signature is rejected by the registry
-//   6. MCP exposes both lumen_* (deprecated) and andromeda_* (canonical) tools
-//   7. MCP's andromeda_search_services and andromeda_list_sellers reach
-//      the registry
+//   5. tampered signature is rejected by the registry (canonical
+//      X-Agora-* AND legacy X-Andromeda-* families both 401)
+//   6. MCP exposes lumen_* (deprecated) AND andromeda_* (deprecated)
+//      AND agora_* (canonical) tool names
+//   7. MCP's agora_search_services and agora_list_sellers reach
+//      the registry (and so do their andromeda_* aliases)
 //   8. After a paid call through the MCP, a transaction appears in
 //      seller stats
 //
@@ -56,7 +58,7 @@ async function main() {
     try { if (existsSync(p)) unlinkSync(p); } catch {}
   }
 
-  console.log("Phase 1 test gate (Andromeda multi-seller)\n");
+  console.log("Phase 1 test gate (Agora multi-seller)\n");
 
   let registry, provider;
   try {
@@ -99,9 +101,22 @@ async function main() {
     if (pj.services.every(s => s.price_sats <= 200)) ok(`price filter: all services ≤200 sat`);
     else ko(`price filter: got higher-priced services`);
 
-    // ── 5. tampered signature rejected
+    // ── 5. tampered signature rejected — both canonical AGORA + legacy ANDROMEDA family
     const tamperBody = JSON.stringify({ pubkey: "deadbeef".repeat(8), name: "evil", url: "http://evil" });
     const tamperR = await fetch(`${REG}/api/v1/sellers/register`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-agora-pubkey": "deadbeef".repeat(8),
+        "x-agora-timestamp": String(Date.now()),
+        "x-agora-sig": "00".repeat(64),
+      },
+      body: tamperBody,
+    });
+    if (tamperR.status === 401) ok(`registry rejects tampered X-Agora-* signature (${tamperR.status})`);
+    else ko(`expected 401 with X-Agora-* tamper, got ${tamperR.status}`);
+
+    const tamperLegacyR = await fetch(`${REG}/api/v1/sellers/register`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -111,8 +126,8 @@ async function main() {
       },
       body: tamperBody,
     });
-    if (tamperR.status === 401) ok(`registry rejects tampered signature (${tamperR.status})`);
-    else ko(`expected 401, got ${tamperR.status}`);
+    if (tamperLegacyR.status === 401) ok(`registry still accepts (and rejects on bad sig) legacy X-Andromeda-* family (${tamperLegacyR.status})`);
+    else ko(`expected 401 with X-Andromeda-* tamper, got ${tamperLegacyR.status}`);
 
     // ── 6. MCP tools — both canonical & alias names present
     console.log("  · starting MCP over stdio ...");
@@ -121,8 +136,9 @@ async function main() {
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_PROVIDER_URL: PROV,
-        ANDROMEDA_REGISTRY_URL: REG,
+        // Canonical AGORA_* env vars (ADR 0013).
+        AGORA_PROVIDER_URL: PROV,
+        AGORA_REGISTRY_URL: REG,
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",
@@ -135,55 +151,66 @@ async function main() {
     const tools = await client.listTools();
     const names = tools.tools.map(t => t.name);
     const requiredCanonical = [
+      "agora_status", "agora_discover", "agora_balance", "agora_set_budget",
+      "agora_verify_listing", "agora_file_receipt", "agora_fetch_receipt",
+      "agora_search_services", "agora_list_sellers", "agora_discover_all",
+    ];
+    const requiredAliasesAndromeda = [
       "andromeda_status", "andromeda_discover", "andromeda_balance", "andromeda_set_budget",
       "andromeda_verify_listing", "andromeda_file_receipt", "andromeda_fetch_receipt",
       "andromeda_search_services", "andromeda_list_sellers", "andromeda_discover_all",
     ];
-    const requiredAliases = [
+    const requiredAliasesLumen = [
       "lumen_status", "lumen_discover", "lumen_balance", "lumen_set_budget",
       "lumen_verify_listing", "lumen_file_receipt", "lumen_fetch_receipt",
     ];
     const missingCanon = requiredCanonical.filter(n => !names.includes(n));
-    const missingAlias = requiredAliases.filter(n => !names.includes(n));
-    if (missingCanon.length === 0) ok(`all ${requiredCanonical.length} canonical andromeda_* tools present`);
+    const missingAndro = requiredAliasesAndromeda.filter(n => !names.includes(n));
+    const missingLumen = requiredAliasesLumen.filter(n => !names.includes(n));
+    if (missingCanon.length === 0) ok(`all ${requiredCanonical.length} canonical agora_* tools present`);
     else ko(`missing canonical: ${missingCanon.join(", ")}`);
-    if (missingAlias.length === 0) ok(`all ${requiredAliases.length} legacy lumen_* aliases present`);
-    else ko(`missing aliases: ${missingAlias.join(", ")}`);
+    if (missingAndro.length === 0) ok(`all ${requiredAliasesAndromeda.length} deprecated andromeda_* aliases present`);
+    else ko(`missing andromeda aliases: ${missingAndro.join(", ")}`);
+    if (missingLumen.length === 0) ok(`all ${requiredAliasesLumen.length} deprecated lumen_* aliases present`);
+    else ko(`missing lumen aliases: ${missingLumen.join(", ")}`);
 
-    // Deprecated description on alias
+    // Deprecated description on aliases (lumen_status + andromeda_status both deprecated)
     const lumenStatus = tools.tools.find(t => t.name === "lumen_status");
     if (lumenStatus?.description?.includes("[deprecated alias")) ok(`lumen_status carries deprecated marker`);
     else ko(`lumen_status missing deprecated marker`);
+    const andromedaStatus = tools.tools.find(t => t.name === "andromeda_status");
+    if (andromedaStatus?.description?.includes("[deprecated alias")) ok(`andromeda_status carries deprecated marker`);
+    else ko(`andromeda_status missing deprecated marker`);
 
     const parse = (res) => res.structuredContent ?? (res.content?.[0]?.text ? JSON.parse(res.content[0].text) : {});
 
-    // ── 7. andromeda_list_sellers reaches registry
-    const lsR = parse(await client.callTool({ name: "andromeda_list_sellers", arguments: {} }));
-    if (lsR.ok && lsR.sellers?.length >= 1) ok(`andromeda_list_sellers → ${lsR.sellers.length} seller(s)`);
+    // ── 7. agora_list_sellers (canonical) reaches registry
+    const lsR = parse(await client.callTool({ name: "agora_list_sellers", arguments: {} }));
+    if (lsR.ok && lsR.sellers?.length >= 1) ok(`agora_list_sellers → ${lsR.sellers.length} seller(s)`);
     else ko(`list_sellers: ${JSON.stringify(lsR).slice(0, 200)}`);
 
-    // ── 8. andromeda_search_services reaches registry
+    // ── 8. agora_search_services reaches registry
     const ssR = parse(await client.callTool({
-      name: "andromeda_search_services",
+      name: "agora_search_services",
       arguments: { query: "listing verification", max_price_sats: 500 },
     }));
-    if (ssR.ok && ssR.count >= 1) ok(`andromeda_search_services → ${ssR.count} hit(s)`);
+    if (ssR.ok && ssR.count >= 1) ok(`agora_search_services → ${ssR.count} hit(s)`);
     else ko(`search_services: ${JSON.stringify(ssR).slice(0, 200)}`);
 
-    // ── 9. andromeda_discover_all (multi-provider catalog)
+    // ── 9. agora_discover_all (multi-provider catalog)
     const daR = parse(await client.callTool({
-      name: "andromeda_discover_all", arguments: { type: "verification" },
+      name: "agora_discover_all", arguments: { type: "verification" },
     }));
-    if (daR.ok && daR.services?.length >= 1) ok(`andromeda_discover_all type=verification → ${daR.services.length}`);
+    if (daR.ok && daR.services?.length >= 1) ok(`agora_discover_all type=verification → ${daR.services.length}`);
     else ko(`discover_all: ${JSON.stringify(daR).slice(0, 200)}`);
 
-    // ── 10. Pay through MCP and check the registry sees the tx
-    parse(await client.callTool({ name: "andromeda_set_budget", arguments: { sats: 1000 } }));
+    // ── 10. Pay through MCP via canonical agora_verify_listing and check the registry sees the tx
+    parse(await client.callTool({ name: "agora_set_budget", arguments: { sats: 1000 } }));
     const vR = parse(await client.callTool({
-      name: "andromeda_verify_listing",
+      name: "agora_verify_listing",
       arguments: { listing: "Eiffel Tower Paris", date: "2026-04-26" },
     }));
-    if (vR.ok && vR.spent_sats === 240) ok(`andromeda_verify_listing paid 240 sat`);
+    if (vR.ok && vR.spent_sats === 240) ok(`agora_verify_listing paid 240 sat`);
     else ko(`paid call: ${JSON.stringify(vR).slice(0, 200)}`);
 
     // Wait for fire-and-forget tx record to land
@@ -193,10 +220,15 @@ async function main() {
     if (stats.tx_count >= 1) ok(`registry seller stats: tx_count=${stats.tx_count}, sats_earned=${stats.sats_earned}`);
     else ko(`expected ≥1 tx, got ${JSON.stringify(stats).slice(0, 200)}`);
 
-    // ── 11. lumen_status (alias) returns same shape as andromeda_status
+    // ── 11. lumen_status (rebrand-2 alias) returns same shape as agora_status
     const lsr = parse(await client.callTool({ name: "lumen_status", arguments: {} }));
     if (lsr.ok && lsr.wallet_mode === "mock") ok(`lumen_status alias works`);
     else ko(`lumen_status alias broken`);
+
+    // ── 12. andromeda_status (rebrand-1 alias) returns same shape as agora_status
+    const asr = parse(await client.callTool({ name: "andromeda_status", arguments: {} }));
+    if (asr.ok && asr.wallet_mode === "mock") ok(`andromeda_status alias works`);
+    else ko(`andromeda_status alias broken`);
 
     await client.close();
   } finally {

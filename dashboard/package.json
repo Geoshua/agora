@@ -1,9 +1,9 @@
 {
-  "name": "@andromeda/dashboard",
+  "name": "@agora/dashboard",
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda local dashboard — Vite + React + TS + Tailwind + Zustand SPA, talks to the MCP control plane.",
+  "description": "Agora local dashboard — Vite + React + TS + Tailwind + Zustand SPA, talks to the MCP control plane.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

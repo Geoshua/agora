@@ -58,9 +58,11 @@ async function main() {
     const p = path.join(REPO, f);
     try { if (existsSync(p)) unlinkSync(p); } catch {}
   }
-  // Reset MCP buyer state.
-  const stateDir = path.join(os.homedir(), ".andromeda");
-  try { rmSync(path.join(stateDir, "subscriptions.json"), { force: true }); } catch {}
+  // Reset MCP buyer state — both canonical (.agora) and legacy (.andromeda).
+  for (const d of [".agora", ".andromeda"]) {
+    const stateDir = path.join(os.homedir(), d);
+    try { rmSync(path.join(stateDir, "subscriptions.json"), { force: true }); } catch {}
+  }
 
   console.log("Phase 2 test gate (subscriptions + market-monitor)\n");
 
@@ -90,8 +92,9 @@ async function main() {
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_REGISTRY_URL: REG,
-        ANDROMEDA_PROVIDER_URL: MON,  // not really used for subscribe path
+        // ADR 0013: canonical AGORA_* env vars; legacy ANDROMEDA_*/LUMEN_* still accepted as fallbacks.
+        AGORA_REGISTRY_URL: REG,
+        AGORA_PROVIDER_URL: MON,  // not really used for subscribe path
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",
@@ -194,13 +197,17 @@ async function main() {
     if (fp?.signature && fp.signature.length >= 40) ok(`alert carries HMAC signature (${fp.signature.length} chars)`);
     else ko(`alert signature missing/short: ${JSON.stringify(fp)}`);
 
-    // 9. New tools surfaced via list_tools
+    // 9. New tools surfaced via list_tools — canonical agora_* + legacy andromeda_* alias both register
     const tools = await client.listTools();
     const names = tools.tools.map(t => t.name);
-    const required = ["andromeda_subscribe", "andromeda_list_subscriptions", "andromeda_check_alerts", "andromeda_topup_subscription", "andromeda_cancel_subscription"];
-    const missing = required.filter(n => !names.includes(n));
-    if (missing.length === 0) ok(`all 5 subscription tools registered`);
-    else ko(`missing: ${missing.join(",")}`);
+    const requiredCanonical = ["agora_subscribe", "agora_list_subscriptions", "agora_check_alerts", "agora_topup_subscription", "agora_cancel_subscription"];
+    const requiredAlias = ["andromeda_subscribe", "andromeda_list_subscriptions", "andromeda_check_alerts", "andromeda_topup_subscription", "andromeda_cancel_subscription"];
+    const missingCanon = requiredCanonical.filter(n => !names.includes(n));
+    const missingAlias = requiredAlias.filter(n => !names.includes(n));
+    if (missingCanon.length === 0) ok(`all 5 canonical agora_* subscription tools registered`);
+    else ko(`missing canonical: ${missingCanon.join(",")}`);
+    if (missingAlias.length === 0) ok(`all 5 legacy andromeda_* subscription aliases still registered`);
+    else ko(`missing alias: ${missingAlias.join(",")}`);
 
     await client.close();
   } finally {

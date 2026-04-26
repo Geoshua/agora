@@ -14,7 +14,8 @@ export function ThemeToggle() {
     const next = !root.classList.contains("dark");
     root.classList.toggle("dark", next);
     try {
-      localStorage.setItem("andromeda-theme", next ? "dark" : "light");
+      // Canonical key. Layout reads agora-theme first, then legacy andromeda-theme.
+      localStorage.setItem("agora-theme", next ? "dark" : "light");
     } catch {
       // ignore
     }

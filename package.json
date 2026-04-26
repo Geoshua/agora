@@ -3,9 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda (formerly LUMEN) — agents pay agents over Lightning. SPIRAL × Hack-Nation Challenge 02.",
+  "description": "Agora (formerly Andromeda, formerly LUMEN) — agents pay agents over Lightning. SPIRAL × Hack-Nation Challenge 02.",
   "workspaces": [
-    "packages/andromeda-core",
+    "packages/agora-core",
     "provider",
     "buyer",
     "mcp",

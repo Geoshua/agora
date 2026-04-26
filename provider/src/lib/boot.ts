@@ -1,6 +1,6 @@
 // Provider boot — runs once per process, lazily on the first inbound
 // request. Generates identity if needed, then self-registers with the
-// Andromeda registry and starts the heartbeat loop.
+// Agora registry and starts the heartbeat loop.
 //
 // Failures are logged but never thrown — registry being down must not
 // break the provider.

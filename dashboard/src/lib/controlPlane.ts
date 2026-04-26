@@ -3,7 +3,11 @@
 
 export type ControlPlaneConfig = { baseUrl: string; token: string };
 
-const LS_KEY = "andromeda.controlPlane";
+// ADR 0013: canonical key is "agora.controlPlane". loadConfig() also reads
+// the legacy "andromeda.controlPlane" key so an existing dashboard install
+// is auto-migrated on first load.
+const LS_KEY = "agora.controlPlane";
+const LEGACY_LS_KEY = "andromeda.controlPlane";
 // Endpoint paths used by the SPA. Kept as exported strings so the build
 // gate's "string match in built bundle" assertion has stable handles.
 export const CP_PATHS = {
@@ -20,7 +24,12 @@ export const CP_PATHS = {
 
 export function loadConfig(): ControlPlaneConfig | null {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    let raw = localStorage.getItem(LS_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_LS_KEY);
+      // Migrate legacy → canonical so we only read once.
+      if (raw) try { localStorage.setItem(LS_KEY, raw); } catch {}
+    }
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (typeof j?.baseUrl === "string" && typeof j?.token === "string") return j;

@@ -49,11 +49,13 @@ async function main() {
     const p = path.join(REPO, f);
     try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
   }
-  // Reset purchased-datasets cache
-  try {
-    const dsDir = path.join(os.homedir(), ".andromeda", "datasets");
-    fs.rmSync(dsDir, { recursive: true, force: true });
-  } catch {}
+  // Reset purchased-datasets cache (canonical + legacy state dirs).
+  for (const d of [".agora", ".andromeda"]) {
+    try {
+      const dsDir = path.join(os.homedir(), d, "datasets");
+      fs.rmSync(dsDir, { recursive: true, force: true });
+    } catch {}
+  }
 
   console.log("Phase 6 test gate (dataset seller + platform fee)\n");
 
@@ -86,12 +88,12 @@ async function main() {
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_REGISTRY_URL: "http://localhost:3030",
-        ANDROMEDA_PROVIDER_URL: "http://localhost:3200",
+        AGORA_REGISTRY_URL: "http://localhost:3030",
+        AGORA_PROVIDER_URL: "http://localhost:3200",
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "10000",
         MAX_BUDGET_SATS: "10000",
-        ANDROMEDA_CONTROL_PLANE: "off",
+        AGORA_CONTROL_PLANE: "off",
       },
       cwd: path.join(REPO, "mcp"),
     });
@@ -100,14 +102,14 @@ async function main() {
 
     const parse = (res) => res.structuredContent ?? (res.content?.[0]?.text ? JSON.parse(res.content[0].text) : {});
 
-    const browse = parse(await client.callTool({ name: "andromeda_browse_datasets", arguments: {} }));
-    if (browse.ok && browse.count >= 1) ok(`andromeda_browse_datasets → ${browse.count} dataset(s)`);
+    const browse = parse(await client.callTool({ name: "agora_browse_datasets", arguments: {} }));
+    if (browse.ok && browse.count >= 1) ok(`agora_browse_datasets → ${browse.count} dataset(s)`);
     else ko(`browse_datasets: ${JSON.stringify(browse).slice(0, 200)}`);
 
-    parse(await client.callTool({ name: "andromeda_set_budget", arguments: { sats: 10000 } }));
+    parse(await client.callTool({ name: "agora_set_budget", arguments: { sats: 10000 } }));
 
     const purch = parse(await client.callTool({
-      name: "andromeda_purchase_dataset",
+      name: "agora_purchase_dataset",
       arguments: { seller_pubkey: sellerPubkey, dataset_id: "noaa-pnw-2015-2025" },
     }));
     if (purch.ok && purch.spent_sats === 5000) ok(`purchase: spent 5000 sat, platform_fee=${purch.platform_fee_sats}, file at ${path.basename(purch.save_path)}`);
@@ -121,10 +123,13 @@ async function main() {
       ok(`dataset file written to disk (${fs.statSync(purch.save_path).size} bytes)`);
     } else ko(`save_path missing or empty`);
 
-    // 5. andromeda_list_datasets sees it
-    const ld = parse(await client.callTool({ name: "andromeda_list_datasets", arguments: {} }));
-    if (ld.ok && ld.count >= 1) ok(`andromeda_list_datasets → ${ld.count} file(s)`);
+    // 5. agora_list_datasets (canonical) sees it; andromeda_list_datasets (alias) too.
+    const ld = parse(await client.callTool({ name: "agora_list_datasets", arguments: {} }));
+    if (ld.ok && ld.count >= 1) ok(`agora_list_datasets → ${ld.count} file(s)`);
     else ko(`list_datasets: ${JSON.stringify(ld).slice(0, 200)}`);
+    const ldLegacy = parse(await client.callTool({ name: "andromeda_list_datasets", arguments: {} }));
+    if (ldLegacy.ok && ldLegacy.count >= 1) ok(`andromeda_list_datasets (legacy alias) still works`);
+    else ko(`legacy list_datasets: ${JSON.stringify(ldLegacy).slice(0, 200)}`);
 
     // 6. registry tx ledger captured platform fee
     await sleep(2500);

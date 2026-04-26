@@ -2,9 +2,11 @@ import React from "react";
 import { useConfigStore } from "../lib/store";
 import { api } from "../lib/controlPlane";
 
-// First-run setup. The user pastes the port (from ~/.andromeda/control-port)
-// and the token (from ~/.andromeda/control-token). We try /healthz before
-// saving so an obviously-wrong config is caught early.
+// First-run setup. The user pastes the port (from ~/.agora/control-port)
+// and the token (from ~/.agora/control-token). We try /healthz before
+// saving so an obviously-wrong config is caught early. (Old ~/.andromeda/
+// path still works — the MCP server migrates contents forward on first
+// run; ADR 0013.)
 export function Setup() {
   const setConfig = useConfigStore((s) => s.setConfig);
   const [port, setPort] = React.useState("");
@@ -31,12 +33,12 @@ export function Setup() {
 
   return (
     <div className="mx-auto max-w-xl p-8">
-      <h1 className="mb-2 text-2xl font-bold tracking-tight">Andromeda Dashboard</h1>
+      <h1 className="mb-2 text-2xl font-bold tracking-tight">Agora Dashboard</h1>
       <p className="mb-6 text-sm text-zinc-400">
         Connect to the local MCP control plane. Read the port from{" "}
-        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs">~/.andromeda/control-port</code>{" "}
+        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs">~/.agora/control-port</code>{" "}
         and the token from{" "}
-        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs">~/.andromeda/control-token</code>.
+        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs">~/.agora/control-token</code>.
       </p>
       <form onSubmit={tryConnect} className="space-y-4">
         <label className="block">

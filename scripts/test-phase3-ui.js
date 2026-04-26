@@ -3,7 +3,8 @@
 //
 // 1.  Spawn the registry (so /sellers proxy has something to talk to).
 // 2.  Spawn the MCP server (mock mode) — its control plane writes
-//     ~/.andromeda/control-port + control-token.
+//     ~/.agora/control-port + control-token (~/.andromeda/ migrated
+//     forward; ADR 0013).
 // 3.  Hit the 5 new control-plane endpoints:
 //       GET  /balance
 //       GET  /transactions
@@ -25,7 +26,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const STATE_DIR = path.join(os.homedir(), ".andromeda");
+const STATE_DIR = path.join(os.homedir(), ".agora");
+const LEGACY_STATE_DIR = path.join(os.homedir(), ".andromeda");
 const PORT_FILE = path.join(STATE_DIR, "control-port");
 const TOKEN_FILE = path.join(STATE_DIR, "control-token");
 const TX_FILE = path.join(STATE_DIR, "transactions.log");
@@ -74,8 +76,10 @@ async function main() {
   // freshly-spawned MCP rebinds. We deliberately do NOT touch the
   // registry/lumen sqlite files because the user's dev servers on
   // 3000/3030/3100/3200 may still be using them.
-  for (const f of [PORT_FILE, TOKEN_FILE]) {
-    try { fs.unlinkSync(f); } catch {}
+  for (const dir of [STATE_DIR, LEGACY_STATE_DIR]) {
+    for (const name of ["control-port", "control-token"]) {
+      try { fs.unlinkSync(path.join(dir, name)); } catch {}
+    }
   }
   // .mcp-session.json is local state owned by the MCP we spawn; safe to clear.
   try { fs.unlinkSync(path.join(REPO, ".mcp-session.json")); } catch {}
@@ -97,8 +101,8 @@ async function main() {
       cwd: path.join(REPO, "mcp"),
       env: {
         ...process.env,
-        ANDROMEDA_PROVIDER_URL: "http://localhost:3000",
-        ANDROMEDA_REGISTRY_URL: "http://localhost:3030",
+        AGORA_PROVIDER_URL: "http://localhost:3000",
+        AGORA_REGISTRY_URL: "http://localhost:3030",
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",

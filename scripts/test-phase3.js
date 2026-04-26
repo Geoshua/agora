@@ -2,7 +2,8 @@
 // Phase 3 test gate — headless control plane + kill-switch.
 //
 // 1. Spawns the MCP server (mock mode, no provider needed).
-// 2. Reads ~/.andromeda/control-port + control-token.
+// 2. Reads ~/.agora/control-port + control-token (legacy ~/.andromeda
+//    is migrated forward by the MCP on first start — ADR 0013).
 // 3. GET /session — returns budget + kill_switch_active=false.
 // 4. POST /session/budget {sats: 999} — budget resets.
 // 5. POST /session/kill-switch {active: true}.
@@ -20,7 +21,9 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const STATE_DIR = path.join(os.homedir(), ".andromeda");
+// Canonical state dir is ~/.agora/ (ADR 0013); MCP migrates ~/.andromeda/ on first start.
+const STATE_DIR = path.join(os.homedir(), ".agora");
+const LEGACY_STATE_DIR = path.join(os.homedir(), ".andromeda");
 const PORT_FILE = path.join(STATE_DIR, "control-port");
 const TOKEN_FILE = path.join(STATE_DIR, "control-token");
 
@@ -60,9 +63,12 @@ async function main() {
     const p = path.join(REPO, f);
     try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
   }
-  // Reset control plane state
-  for (const f of [PORT_FILE, TOKEN_FILE, path.join(STATE_DIR, "subscriptions.json")]) {
-    try { fs.unlinkSync(f); } catch {}
+  // Reset control plane state — both canonical (~/.agora/) and legacy
+  // (~/.andromeda/) so the MCP starts fresh.
+  for (const dir of [STATE_DIR, LEGACY_STATE_DIR]) {
+    for (const name of ["control-port", "control-token", "subscriptions.json", "MIGRATED-FROM-ANDROMEDA"]) {
+      try { fs.unlinkSync(path.join(dir, name)); } catch {}
+    }
   }
 
   console.log("Phase 3 test gate (control plane + kill-switch)\n");
@@ -78,14 +84,14 @@ async function main() {
 
     await sleep(2000);
 
-    // Spawn MCP — its control plane writes ~/.andromeda/control-port + control-token
+    // Spawn MCP — its control plane writes ~/.agora/control-port + control-token
     const transport = new StdioClientTransport({
       command: "node",
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_PROVIDER_URL: "http://localhost:3000",
-        ANDROMEDA_REGISTRY_URL: "http://localhost:3030",
+        AGORA_PROVIDER_URL: "http://localhost:3000",
+        AGORA_REGISTRY_URL: "http://localhost:3030",
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",
@@ -143,7 +149,7 @@ async function main() {
     // ── 6. Paid call refused with kill_switch_active reason
     const parse = (res) => res.structuredContent ?? (res.content?.[0]?.text ? JSON.parse(res.content[0].text) : {});
     const v1 = parse(await client.callTool({
-      name: "andromeda_verify_listing",
+      name: "agora_verify_listing",
       arguments: { listing: "Hotel Adlon Berlin", date: "2026-04-26" },
     }));
     if (!v1.ok && (v1.error?.includes("kill_switch_active") || v1.error?.includes("kill"))) {
@@ -156,7 +162,7 @@ async function main() {
       body: JSON.stringify({ active: false }),
     });
     const v2 = parse(await client.callTool({
-      name: "andromeda_verify_listing",
+      name: "agora_verify_listing",
       arguments: { listing: "Eiffel Tower Paris", date: "2026-04-26" },
     }));
     if (v2.ok && v2.spent_sats === 240) ok(`kill-switch off → paid call works`);

@@ -1,4 +1,4 @@
-// Smoke test for @andromeda/core. Runs against the built dist/.
+// Smoke test for @agora/core. Runs against the built dist/.
 // Exits 0 on pass, non-zero on failure.
 
 import assert from "node:assert";
@@ -8,6 +8,10 @@ import {
   mintMacaroon, verifyMacaroon, verifyPreimage, parseAuthHeader,
   validateReviewSubmission, rollupScore,
   DEFAULTS,
+  HDR_PUBKEY, HDR_TIMESTAMP, HDR_SIG,
+  HDR_PUBKEY_ANDROMEDA, HDR_TIMESTAMP_ANDROMEDA, HDR_SIG_ANDROMEDA,
+  HDR_PUBKEY_LUMEN, HDR_TIMESTAMP_LUMEN, HDR_SIG_LUMEN,
+  readEnv, readEnvOr,
 } from "../dist/index.js";
 
 let pass = 0, total = 0;
@@ -17,7 +21,7 @@ async function it(name, fn) {
   catch (e) { console.error(`  FAIL · ${name}: ${e.message}`); }
 }
 
-console.log("@andromeda/core smoke");
+console.log("@agora/core smoke");
 
 await it("generateKeypair returns hex of correct length", async () => {
   const kp = await generateKeypair();
@@ -33,9 +37,9 @@ await it("pubkeyFor is deterministic for a fixed seed", async () => {
 
 await it("sign/verify utf8 roundtrip", async () => {
   const kp = await generateKeypair();
-  const sig = await signUtf8("hello andromeda", kp.privkey_hex);
+  const sig = await signUtf8("hello agora", kp.privkey_hex);
   assert.strictEqual(sig.length, 128);
-  assert.strictEqual(await verifyUtf8("hello andromeda", sig, kp.pubkey_hex), true);
+  assert.strictEqual(await verifyUtf8("hello agora", sig, kp.pubkey_hex), true);
   assert.strictEqual(await verifyUtf8("tampered", sig, kp.pubkey_hex), false);
 });
 
@@ -120,12 +124,91 @@ await it("signed-request rejects flipped pubkey", async () => {
     method: "GET", path: "/v1/x", body: "",
     privkeyHex: kpA.privkey_hex, pubkeyHex: kpA.pubkey_hex,
   });
-  // Swap in another pubkey but keep A's signature.
-  headers["x-andromeda-pubkey"] = kpB.pubkey_hex;
+  // Swap in another pubkey but keep A's signature (canonical AGORA hdr).
+  headers[HDR_PUBKEY] = kpB.pubkey_hex;
   const r = await verifyRequest({
     method: "GET", path: "/v1/x", body: "", headers,
   });
   assert.strictEqual(r.ok, false);
+});
+
+await it("signRequest emits canonical X-Agora-* headers", async () => {
+  const kp = await generateKeypair();
+  const headers = await signRequest({
+    method: "GET", path: "/v1/x", body: "",
+    privkeyHex: kp.privkey_hex, pubkeyHex: kp.pubkey_hex,
+  });
+  assert.ok(headers[HDR_PUBKEY], "missing x-agora-pubkey");
+  assert.ok(headers[HDR_TIMESTAMP], "missing x-agora-timestamp");
+  assert.ok(headers[HDR_SIG], "missing x-agora-sig");
+  // Must NOT emit legacy headers.
+  assert.strictEqual(headers[HDR_PUBKEY_ANDROMEDA], undefined);
+  assert.strictEqual(headers[HDR_PUBKEY_LUMEN], undefined);
+});
+
+await it("verifyRequest accepts legacy X-Andromeda-* family", async () => {
+  const kp = await generateKeypair();
+  const ts = Date.now();
+  const sig = await signUtf8(["GET", "/v1/legacy", "", String(ts)].join("\n"), kp.privkey_hex);
+  const r = await verifyRequest({
+    method: "GET", path: "/v1/legacy", body: "",
+    headers: {
+      [HDR_PUBKEY_ANDROMEDA]: kp.pubkey_hex,
+      [HDR_TIMESTAMP_ANDROMEDA]: String(ts),
+      [HDR_SIG_ANDROMEDA]: sig,
+    },
+  });
+  assert.strictEqual(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
+  if (r.ok) assert.strictEqual(r.family, "andromeda");
+});
+
+await it("verifyRequest accepts legacy X-Lumen-* family", async () => {
+  const kp = await generateKeypair();
+  const ts = Date.now();
+  const sig = await signUtf8(["GET", "/v1/legacy", "", String(ts)].join("\n"), kp.privkey_hex);
+  const r = await verifyRequest({
+    method: "GET", path: "/v1/legacy", body: "",
+    headers: {
+      [HDR_PUBKEY_LUMEN]: kp.pubkey_hex,
+      [HDR_TIMESTAMP_LUMEN]: String(ts),
+      [HDR_SIG_LUMEN]: sig,
+    },
+  });
+  assert.strictEqual(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
+  if (r.ok) assert.strictEqual(r.family, "lumen");
+});
+
+await it("verifyRequest prefers AGORA family when multiple are present", async () => {
+  const kpAgora = await generateKeypair();
+  const kpAndro = await generateKeypair();
+  const ts = Date.now();
+  const sigAgora = await signUtf8(["GET", "/v1/x", "", String(ts)].join("\n"), kpAgora.privkey_hex);
+  const sigAndro = await signUtf8(["GET", "/v1/x", "", String(ts)].join("\n"), kpAndro.privkey_hex);
+  const r = await verifyRequest({
+    method: "GET", path: "/v1/x", body: "",
+    headers: {
+      [HDR_PUBKEY]: kpAgora.pubkey_hex,
+      [HDR_TIMESTAMP]: String(ts),
+      [HDR_SIG]: sigAgora,
+      [HDR_PUBKEY_ANDROMEDA]: kpAndro.pubkey_hex,
+      [HDR_TIMESTAMP_ANDROMEDA]: String(ts),
+      [HDR_SIG_ANDROMEDA]: sigAndro,
+    },
+  });
+  assert.strictEqual(r.ok, true);
+  if (r.ok) {
+    assert.strictEqual(r.family, "agora");
+    assert.strictEqual(r.pubkey, kpAgora.pubkey_hex);
+  }
+});
+
+await it("readEnv prefers AGORA_*, falls back to ANDROMEDA_* then LUMEN_*", () => {
+  const src = { LUMEN_X: "lumen", ANDROMEDA_X: "andro", AGORA_X: "agora" };
+  assert.strictEqual(readEnv("X", { source: src }), "agora");
+  assert.strictEqual(readEnv("X", { source: { ANDROMEDA_X: "andro", LUMEN_X: "lumen" } }), "andro");
+  assert.strictEqual(readEnv("X", { source: { LUMEN_X: "lumen" } }), "lumen");
+  assert.strictEqual(readEnv("X", { source: {} }), undefined);
+  assert.strictEqual(readEnvOr("X", "fallback", { source: {} }), "fallback");
 });
 
 await it("L402 macaroon mint/verify roundtrip", () => {

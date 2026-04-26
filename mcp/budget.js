@@ -18,9 +18,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// ADR 0002: existing .mcp-session.json stays put (don't invalidate sessions).
-// Read new env var first, fall back to legacy LUMEN_MCP_STATE_PATH.
+// ADR 0002 + ADR 0013: existing .mcp-session.json stays put (don't
+// invalidate sessions). Read AGORA_MCP_STATE_PATH first, fall back to
+// ANDROMEDA_MCP_STATE_PATH then LUMEN_MCP_STATE_PATH.
 const STATE_PATH =
+  process.env.AGORA_MCP_STATE_PATH ??
   process.env.ANDROMEDA_MCP_STATE_PATH ??
   process.env.LUMEN_MCP_STATE_PATH ??
   path.resolve(process.cwd(), "..", ".mcp-session.json");
@@ -92,7 +94,7 @@ export function confirm(amount) {
   save();
 }
 
-/** Reset the budget to a new value. Used by the andromeda_set_budget tool. */
+/** Reset the budget to a new value. Used by the agora_set_budget tool (and its andromeda_/lumen_ aliases). */
 export function setBudget(amount) {
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("budget must be a positive integer (sats)");
   state.budget = amount;

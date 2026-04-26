@@ -1,6 +1,6 @@
 // Signed-request verification helper for the registry's POST routes.
 
-import { verifyRequest, HDR_PUBKEY, HDR_TIMESTAMP, HDR_SIG } from "@andromeda/core";
+import { verifyRequest, HDR_PUBKEY, HDR_TIMESTAMP, HDR_SIG } from "@agora/core";
 
 export type SigVerifyResult =
   | { ok: true; pubkey: string }

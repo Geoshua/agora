@@ -1,8 +1,15 @@
-# LUMEN — Earn in the Agent Economy
+# Agora — Earn in the Agent Economy
+
+> **Brand history:** the codebase is currently `lumen` (the original npm
+> root name) and the public brand is **Agora**. It went LUMEN → Andromeda
+> (ADR 0002) → Agora (ADR 0013). All three names work as MCP tool
+> prefixes; the env-var resolution chain reads `AGORA_*` first, then
+> `ANDROMEDA_*`, then `LUMEN_*`. New code should use `AGORA_*` /
+> `agora_*`.
 
 A working demo for **SPIRAL × Hack-Nation Challenge 02**.
 
-LUMEN is a Lightning-paywalled marketplace that AI agents can buy from
+Agora is a Lightning-paywalled marketplace that AI agents can buy from
 autonomously. A buyer agent (`tripplanner-7`) needs a hotel listing
 verified, and then needs an audit receipt for the order it just placed.
 The provider (`vision-oracle-3`) sells **two services on one wallet**:
@@ -35,7 +42,7 @@ Two endpoints, ~250 lines of code, the L402 protocol from the brief.
 | `concept.html`      | Editorial concept page (open in any browser).                 |
 | `provider/`         | Next.js 16 service that sells `listing-verify` over L402.     |
 | `buyer/`            | Node script — the AI agent that auto-pays the paywall.        |
-| `mcp/`              | **PayMyAgent** — MCP server so Claude Desktop / Cursor can hire LUMEN providers per task. See [`PAYMYAGENT.md`](PAYMYAGENT.md). |
+| `mcp/`              | **PayMyAgent** — MCP server so Claude Desktop / Cursor can hire Agora providers per task. See [`PAYMYAGENT.md`](PAYMYAGENT.md). |
 | `dashboard/`        | Vite + React + TS + Tailwind SPA. One-screen view of wallet, allowance, subs, txs, sellers. Talks to the MCP control plane on `127.0.0.1`. ADR 0011. |
 | `web/`              | **Public web index** (Phase 7) — read-only Next.js site over the registry. Port 3300. See [Public web index](#public-web-index) below. |
 | `scripts/`          | `preflight.js`, `test-phase1.js`, `test-mcp.js`, `test-phase3-ui.js`, `test-phase7.js`, … |
@@ -90,23 +97,25 @@ It talks only to the **MCP control plane** — never to the registry directly �
 the bearer token, kill switch, and CORS scope cover every section.
 
 ```bash
-# 1. Make sure the MCP is running (writes the port + token to ~/.andromeda/):
+# 1. Make sure the MCP is running (writes the port + token to ~/.agora/):
 npm run mcp
 
 # 2. In another terminal, start the dashboard SPA on http://localhost:5173:
 npm run dashboard
 ```
 
-On first load the SPA asks for the **port** (`~/.andromeda/control-port`) and
-**bearer token** (`~/.andromeda/control-token`). Paste both — they're cached
+On first load the SPA asks for the **port** (`~/.agora/control-port`) and
+**bearer token** (`~/.agora/control-token`). Paste both — they're cached
 in `localStorage`, so subsequent visits go straight to the dashboard.
+(If you have an existing `~/.andromeda/` from the previous rebrand the
+MCP migrates it forward on first start; ADR 0013.)
 
 Sections:
 
 - **Wallet** — NWC balance, top-up button (opens Alby Hub), last 10 local txs.
 - **Allowance** — daily-cap slider, per-call slider, big red kill-switch toggle.
 - **Active subscriptions** — sat-per-event subs with runway estimate + cancel.
-- **Transactions** — `~/.andromeda/transactions.log` (full history, JSONL).
+- **Transactions** — `~/.agora/transactions.log` (full history, JSONL).
 - **Sellers I've used** — txs grouped by seller with totals + last interaction.
 
 ### Tauri shell (optional)
@@ -236,7 +245,7 @@ All requests / responses are JSON.
 
 ## Mapping to the brief
 
-| Brief tool        | What it does in LUMEN                                        |
+| Brief tool        | What it does in Agora                                        |
 |-------------------|--------------------------------------------------------------|
 | **L402**          | The paywall handshake. Implemented in `provider/src/lib/l402.ts`. |
 | **MoneyDevKit**   | See note below.                                              |
@@ -244,7 +253,7 @@ All requests / responses are JSON.
 | **Lexe**          | Drop-in replacement for the Alby provider wallet (set `NWC_URL` to a Lexe NWC string instead). |
 | **Spark**         | Reserved for the v2 escrow layer — not in M1–M3 scope.       |
 
-### Why the LUMEN provider doesn't import MDK
+### Why the Agora provider doesn't import MDK
 
 The brief markets MoneyDevKit as the canonical way to "add Lightning
 payments to any API." In practice the runtime package
@@ -281,10 +290,11 @@ If MDK ships an L402-server package later, this is a one-file swap.
 
 ## Want Claude to drive it?
 
-[`PAYMYAGENT.md`](PAYMYAGENT.md) walks you through wiring the LUMEN MCP
-server into Claude Desktop. Five minutes; gives Claude six tools, three
+[`PAYMYAGENT.md`](PAYMYAGENT.md) walks you through wiring the Agora MCP
+server into Claude Desktop. Five minutes; gives Claude tools (`agora_*`
+canonical, `andromeda_*` and `lumen_*` deprecated aliases), three
 spending guardrails (per-call cap, per-session budget, persisted spend
-counter), and the ability to hire LUMEN providers per task on real
+counter), and the ability to hire Agora providers per task on real
 Lightning. End-to-end verifiable via `npm run test:mcp` (12 checks, no
 Claude install required).
 

@@ -3,8 +3,9 @@
 // Lets a desktop dashboard (or a curl) read session state and flip the
 // kill-switch / reset the budget without restarting the MCP. Binds to
 // 127.0.0.1 only. Bearer-token auth — token is 32 bytes hex, stored
-// 0600 at ~/.andromeda/control-token. Bound port is written to
-// ~/.andromeda/control-port.
+// 0600 at ~/.agora/control-token. Bound port is written to
+// ~/.agora/control-port. (Legacy ~/.andromeda/ is migrated on first
+// run — ADR 0013.)
 //
 // Endpoints (all require Authorization: Bearer <token> except /healthz):
 //
@@ -16,7 +17,7 @@
 //
 //   ── Phase 3-UI proxies (additive; ADR 0011) ───────────────────────
 //   GET  /balance                     — wallet balance via NWC (proxied)
-//   GET  /transactions                — ~/.andromeda/transactions.log
+//   GET  /transactions                — ~/.agora/transactions.log
 //   GET  /subscriptions               — aggregated subscription state
 //   POST /subscriptions/:id/cancel    — proxy to seller cancel
 //   GET  /sellers                     — proxy to registry /api/v1/sellers
@@ -26,45 +27,48 @@
 
 import http from "node:http";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { getStatus as budgetStatus, setBudget, getKillSwitch, setKillSwitch } from "./budget.js";
 import * as subs from "./subscriptions.js";
 import { readTransactions, transactionsLogPath } from "./transactions-log.js";
+import { stateDir, stateDirPath } from "./state-dir.js";
 
-const STATE_DIR = process.env.ANDROMEDA_STATE_DIR ?? path.join(os.homedir(), ".andromeda");
-const PORT_FILE = path.join(STATE_DIR, "control-port");
-const TOKEN_FILE = path.join(STATE_DIR, "control-token");
+function portFile() { return stateDirPath("control-port"); }
+function tokenFile() { return stateDirPath("control-token"); }
 
 // ── CORS ──────────────────────────────────────────────────────────────
 // One allowed dev origin. Tauri shell would add `tauri://localhost` here.
 // Comma-separated override via env for tests / packaging.
 const ALLOWED_ORIGINS = (
-  process.env.ANDROMEDA_DASHBOARD_ORIGINS ?? "http://localhost:5173"
+  process.env.AGORA_DASHBOARD_ORIGINS ??
+  process.env.ANDROMEDA_DASHBOARD_ORIGINS ??
+  process.env.LUMEN_DASHBOARD_ORIGINS ??
+  "http://localhost:5173"
 ).split(",").map(s => s.trim()).filter(Boolean);
 
 // ── registry URL (used by /sellers and balance proxies) ───────────────
 const REGISTRY_URL =
+  process.env.AGORA_REGISTRY_URL ??
   process.env.ANDROMEDA_REGISTRY_URL ??
+  process.env.LUMEN_REGISTRY_URL ??
   "http://localhost:3030";
 
 let _server = null;
 let _token = null;
 let _port = null;
 
-function ensureDir() { try { fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 }); } catch {} }
+function ensureDir() { try { fs.mkdirSync(stateDir(), { recursive: true, mode: 0o700 }); } catch {} }
 
 function loadOrMintToken() {
   ensureDir();
   try {
-    const t = fs.readFileSync(TOKEN_FILE, "utf8").trim();
+    const t = fs.readFileSync(tokenFile(), "utf8").trim();
     if (t.length === 64) return t;
   } catch {}
   const t = randomBytes(32).toString("hex");
   try {
-    fs.writeFileSync(TOKEN_FILE, t, { mode: 0o600 });
+    fs.writeFileSync(tokenFile(), t, { mode: 0o600 });
     // On windows mode is best-effort.
   } catch (e) {
     process.stderr.write(`[control-plane] WARN couldn't persist token: ${e.message}\n`);
@@ -215,7 +219,11 @@ async function handler(req, res) {
       budget: budgetStatus(),
       kill_switch_active: getKillSwitch(),
       subscriptions: subs.listAll(),
-      provider_url: process.env.ANDROMEDA_PROVIDER_URL ?? process.env.LUMEN_PROVIDER_URL ?? "http://localhost:3000",
+      provider_url:
+        process.env.AGORA_PROVIDER_URL ??
+        process.env.ANDROMEDA_PROVIDER_URL ??
+        process.env.LUMEN_PROVIDER_URL ??
+        "http://localhost:3000",
       registry_url: REGISTRY_URL,
       wallet_mode: process.env.MOCK_MODE === "true" ? "mock" : "real",
     });
@@ -303,7 +311,7 @@ export async function startControlPlane() {
     _server.on("error", reject);
     _server.listen(0, "127.0.0.1", () => {
       _port = _server.address().port;
-      try { fs.writeFileSync(PORT_FILE, String(_port)); } catch {}
+      try { fs.writeFileSync(portFile(), String(_port)); } catch {}
       process.stderr.write(`[control-plane] listening on 127.0.0.1:${_port}\n`);
       resolve({ port: _port, token: _token });
     });
@@ -317,5 +325,5 @@ export function stopControlPlane() {
 }
 
 export function controlPlaneInfo() {
-  return { port: _port, token: _token, port_file: PORT_FILE, token_file: TOKEN_FILE };
+  return { port: _port, token: _token, port_file: portFile(), token_file: tokenFile() };
 }

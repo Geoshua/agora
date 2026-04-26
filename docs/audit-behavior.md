@@ -1,5 +1,9 @@
 # Andromeda — Behavior Audit
 
+> **Historical note:** This audit was written under the project's
+> previous name. The codebase is now branded **Agora** (see ADR 0013).
+> Findings below are still applicable; only the brand changed.
+
 Independent verification of the claims in `README.md`, `PAYMYAGENT.md`, and `docs/BUILD-SUMMARY.md`.
 
 Auditor stance: black box. Code was read but not modified. Each test gate was run from a clean port state with `MOCK_MODE=true` (default). HTTP endpoints were probed manually with `curl`. MCP tool registry was diffed against the doc table by reading `mcp/server.js`.

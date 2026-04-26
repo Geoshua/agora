@@ -14,7 +14,10 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REGISTRY_URL = process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030";
+const REGISTRY_URL =
+  process.env.AGORA_REGISTRY_URL ??
+  process.env.ANDROMEDA_REGISTRY_URL ??
+  "http://localhost:3030";
 const WEB_URL = "http://localhost:3300";
 
 let pass = 0,
@@ -107,7 +110,7 @@ async function main() {
   const web = spawn("npm", ["--workspace=web", "run", "start"], {
     cwd: REPO,
     shell: true,
-    env: { ...process.env, ANDROMEDA_REGISTRY_URL: REGISTRY_URL },
+    env: { ...process.env, AGORA_REGISTRY_URL: REGISTRY_URL },
     stdio: "pipe",
   });
   web.stdout.on("data", () => {});
@@ -141,7 +144,7 @@ async function main() {
       {
         name: "/",
         url: `${WEB_URL}/`,
-        markers: [/Andromeda/, /Featured services/, /How it works/],
+        markers: [/Agora/, /Featured services/, /How it works/],
       },
       {
         name: "/sellers",

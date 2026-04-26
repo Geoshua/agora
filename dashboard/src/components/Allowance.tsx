@@ -2,18 +2,23 @@ import React from "react";
 import { Section } from "./Section";
 import { useSessionStore } from "../lib/store";
 
-// `~/.andromeda/config.json` is the persistence target the brief calls
+// `~/.agora/config.json` is the persistence target the brief calls
 // out for the slider values. Right now budget is a single number on the
 // MCP side (.mcp-session.json), but per-call max + the slider state are
 // dashboard-only preferences. We persist them locally; the MCP picks up
 // MAX_PRICE_SATS from env, so a future control-plane endpoint can sync
 // these (additive, ADR 0011).
-const LS_KEY = "andromeda.allowance";
+//
+// ADR 0013: localStorage key is canonical "agora.allowance"; on first
+// load we migrate any "andromeda.allowance" value forward.
+const LS_KEY = "agora.allowance";
+const LEGACY_LS_KEY = "andromeda.allowance";
 
 interface Allowance { dailyCapSats: number; perCallMaxSats: number; }
 function loadLocal(): Allowance {
   try {
-    const r = JSON.parse(localStorage.getItem(LS_KEY) ?? "");
+    const raw = localStorage.getItem(LS_KEY) ?? localStorage.getItem(LEGACY_LS_KEY) ?? "";
+    const r = JSON.parse(raw);
     if (typeof r?.dailyCapSats === "number" && typeof r?.perCallMaxSats === "number") return r;
   } catch {}
   return { dailyCapSats: 5000, perCallMaxSats: 1000 };

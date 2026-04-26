@@ -2,25 +2,29 @@
 // Self-registers on startup; records each settled tx as fire-and-forget.
 // Never throws back into the request path; logs failures and moves on.
 
-import { signRequest } from "@andromeda/core";
+import { signRequest } from "@agora/core";
 import { ensureIdentity, tryIdentity } from "./identity";
 import { logger } from "./log";
 
 const REGISTRY_URL =
+  process.env.AGORA_REGISTRY_URL ??
   process.env.ANDROMEDA_REGISTRY_URL ??
   process.env.LUMEN_REGISTRY_URL ??
   "http://localhost:3030";
 
 const PROVIDER_PUBLIC_URL =
+  process.env.AGORA_PROVIDER_PUBLIC_URL ??
   process.env.ANDROMEDA_PROVIDER_PUBLIC_URL ??
   process.env.PROVIDER_PUBLIC_URL ??
   `http://localhost:${process.env.PORT ?? 3000}`;
 
 const PROVIDER_NAME =
+  process.env.AGORA_PROVIDER_NAME ??
   process.env.ANDROMEDA_PROVIDER_NAME ??
   "vision-oracle-3";
 
 const PROVIDER_DESCRIPTION =
+  process.env.AGORA_PROVIDER_DESCRIPTION ??
   process.env.ANDROMEDA_PROVIDER_DESCRIPTION ??
   "OSM-geocoded listing verification + signed delivery receipts.";
 
@@ -97,7 +101,12 @@ export function startHeartbeat() {
   }, 60_000);
 }
 
-const PLATFORM_FEE_BPS = parseInt(process.env.ANDROMEDA_PLATFORM_FEE_BPS ?? "200", 10);
+const PLATFORM_FEE_BPS = parseInt(
+  process.env.AGORA_PLATFORM_FEE_BPS ??
+  process.env.ANDROMEDA_PLATFORM_FEE_BPS ??
+  "200",
+  10,
+);
 
 /** Fire-and-forget: record a transaction. Never throws. */
 export function recordTxFireAndForget(args: {

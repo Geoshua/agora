@@ -1,4 +1,4 @@
-// Andromeda registry — SQLite persistence with numbered migrations.
+// Agora registry — SQLite persistence with numbered migrations.
 
 import Database from "better-sqlite3";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -23,7 +23,10 @@ function migrationsDir(): string {
 
 export function db(): Database.Database {
   if (_db) return _db;
-  const file = process.env.ANDROMEDA_REGISTRY_DB_PATH ?? path.resolve(process.cwd(), "..", "registry.db");
+  const file =
+    process.env.AGORA_REGISTRY_DB_PATH ??
+    process.env.ANDROMEDA_REGISTRY_DB_PATH ??
+    path.resolve(process.cwd(), "..", "registry.db");
   _db = new Database(file);
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");

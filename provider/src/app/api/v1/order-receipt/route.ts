@@ -59,8 +59,13 @@ export async function POST(req: Request) {
     receipt_id, claims_json, signature, order_id: body.order_id, buyer: body.buyer ?? null,
   });
 
+  // Accept canonical x-agora-pubkey AND legacy x-andromeda-/x-lumen- families (ADR 0013).
+  const buyer_pubkey =
+    req.headers.get("x-agora-pubkey") ??
+    req.headers.get("x-andromeda-pubkey") ??
+    req.headers.get("x-lumen-pubkey");
   recordTxFireAndForget({
-    buyer_pubkey: req.headers.get("x-andromeda-pubkey"),
+    buyer_pubkey,
     service_local_id: "order-receipt",
     amount_sats: result.body.amount,
     payment_hash: result.body.payment_hash,

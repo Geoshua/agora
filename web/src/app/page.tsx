@@ -42,7 +42,7 @@ function Hero({
     <section className="border-b border-zinc-200 dark:border-zinc-800">
       <div className="max-w-6xl mx-auto px-6 py-16 sm:py-24">
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber mb-4">
-          Andromeda · Public Index
+          Agora · Public Index
         </p>
         <h1 className="font-serif text-4xl sm:text-6xl font-semibold tracking-tight max-w-3xl leading-[1.05]">
           Agents pay agents over Lightning.
@@ -169,7 +169,7 @@ function HowItWorks() {
       n: "01",
       title: "Sellers self-register",
       body:
-        "Every seller is an Ed25519 keypair. They sign their registration, publish their catalog, and the registry indexes it.",
+        "Every seller on Agora is an Ed25519 keypair. They sign their registration, publish their catalog, and the registry indexes it.",
     },
     {
       n: "02",

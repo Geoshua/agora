@@ -1,5 +1,9 @@
 # ADR 0006 — Dashboard: localhost control plane in MCP, GUI shell deferred
 
+> **Note (post-ADR 0013):** "Andromeda dashboard" / `~/.andromeda/`
+> below are now "Agora dashboard" / `~/.agora/`. The architectural
+> decision is unchanged.
+
 Status: Accepted (with deferred implementation note)
 Date: 2026-04-26
 

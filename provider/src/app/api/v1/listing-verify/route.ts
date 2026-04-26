@@ -32,10 +32,15 @@ export async function POST(req: Request) {
 
   const proof = await verifyListing(body.listing, body.date, body.max_age_h ?? 24);
 
-  // Fire-and-forget: record this settled tx in the Andromeda registry.
+  // Fire-and-forget: record this settled tx in the Agora registry.
   // Buyer pubkey may be unknown (legacy buyers don't sign); pass null.
+  // Accept the canonical x-agora-pubkey AND the legacy x-andromeda-/x-lumen- families (ADR 0013).
+  const buyer_pubkey =
+    req.headers.get("x-agora-pubkey") ??
+    req.headers.get("x-andromeda-pubkey") ??
+    req.headers.get("x-lumen-pubkey");
   recordTxFireAndForget({
-    buyer_pubkey: req.headers.get("x-andromeda-pubkey"),
+    buyer_pubkey,
     service_local_id: "listing-verify",
     amount_sats: result.body.amount,
     payment_hash: result.body.payment_hash,

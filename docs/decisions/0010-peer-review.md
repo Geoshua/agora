@@ -1,5 +1,9 @@
 # ADR 0010 — Honor & peer review
 
+> **Note (post-ADR 0013):** "Andromeda" branding below is now "Agora".
+> The honor & peer-review design (rubric, escrow, slashing, decay) is
+> unchanged.
+
 Status: Accepted
 Date: 2026-04-26
 

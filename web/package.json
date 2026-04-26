@@ -1,8 +1,8 @@
 {
-  "name": "@andromeda/web",
-  "version": "0.1.0",
+  "name": "@agora/web",
+  "version": "0.2.0",
   "private": true,
-  "description": "Andromeda public web index (Phase 7) — read-only browser-facing site.",
+  "description": "Agora public web index (Phase 7) — read-only browser-facing site.",
   "scripts": {
     "dev": "next dev -p 3300",
     "build": "next build",

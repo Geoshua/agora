@@ -9,7 +9,7 @@ export default function NotFound() {
       <h1 className="font-serif text-5xl mt-2">Not in the registry.</h1>
       <p className="mt-4 text-zinc-600 dark:text-zinc-300 max-w-xl mx-auto">
         The seller pubkey or service id you requested is not in the
-        Andromeda registry. It may have been removed, or never existed.
+        Agora registry. It may have been removed, or never existed.
       </p>
       <div className="mt-8 flex justify-center gap-3">
         <Link

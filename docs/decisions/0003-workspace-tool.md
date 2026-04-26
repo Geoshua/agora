@@ -3,6 +3,11 @@
 Status: Accepted
 Date: 2026-04-26
 
+> **Note (post-ADR 0013):** "Andromeda" + `packages/andromeda-core/` in
+> the narrative below have since been renamed to "Agora" +
+> `packages/agora-core/`. The workspace-tool decision (npm workspaces)
+> is unchanged.
+
 ## Context
 
 Andromeda spans many packages: `provider/`, `buyer/`, `mcp/`,

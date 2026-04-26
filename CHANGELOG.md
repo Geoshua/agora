@@ -1,6 +1,80 @@
 # Changelog
 
-## Unreleased — Andromeda
+## Unreleased — Agora
+
+### Rebrand Andromeda → Agora (2026-04-26)
+
+The project's final rebrand. Same pattern as ADR 0002, applied a second
+time. `agora_*` is canonical; `andromeda_*` joins `lumen_*` as a
+deprecated alias. ADR 0013 is authoritative.
+
+- **Workspace package** `packages/andromeda-core/` →
+  `packages/agora-core/`. Renamed npm package from `@andromeda/core` to
+  `@agora/core`. All 8 consumer files updated; root `workspaces` array
+  updated; `npm install` refreshed the lockfile.
+- **`@agora/core` adds two helpers**:
+  `readEnv(name) → AGORA_ → ANDROMEDA_ → LUMEN_ resolution chain`, and
+  `stateDir() → ~/.agora/ canonical with one-shot copy from ~/.andromeda/`.
+- **MCP tools** (`mcp/server.js`) — every `andromeda_*` tool now
+  registers under three names: canonical `agora_*` plus deprecated
+  aliases `andromeda_*` and (for the original 7) `lumen_*`. All resolve
+  to the same handler. Deprecated names carry the
+  `[deprecated alias of agora_<name> — will be removed in a future release]`
+  prefix in their description. Total: 23 canonical + 14 aliases = 37
+  registered names.
+- **Signed-request headers** (`packages/agora-core/src/signed-request.ts`)
+  — outgoing requests now emit canonical `X-Agora-Pubkey/Sig/Timestamp`.
+  The verifier accepts THREE families: `X-Agora-*`, `X-Andromeda-*`,
+  `X-Lumen-*`. The `VerifyResult` type carries a `family` discriminator.
+- **Buyer-attribution header** (`x-agora-pubkey`) — provider's
+  `/api/v1/listing-verify`, `/api/v1/order-receipt`, dataset-seller's
+  `/purchase`, market-monitor — all now read `x-agora-pubkey` first,
+  falling back to `x-andromeda-pubkey` / `x-lumen-pubkey`.
+- **Env vars** — every `ANDROMEDA_*` lookup site now does
+  `AGORA_X ?? ANDROMEDA_X ?? LUMEN_X`. Affected files: `mcp/lumen-client.js`,
+  `mcp/control-plane.js`, `mcp/budget.js`, `mcp/identity.js`,
+  `mcp/registry-client.js`, `provider/src/lib/registry-client.ts`,
+  `provider/src/lib/identity.ts`, `registry/src/lib/db.ts`,
+  `registry/src/app/api/v1/reviews/[id]/dispute/route.ts`,
+  `agents/market-monitor/src/server.js`,
+  `agents/dataset-seller/src/server.js`, `web/src/lib/registry.ts`,
+  `web/src/app/sitemap.ts`, every test gate.
+- **Local state directory** — canonical `~/.agora/`. New helper
+  `mcp/state-dir.js` performs one-shot recursive copy from
+  `~/.andromeda/` on first read, drops a `MIGRATED-FROM-ANDROMEDA`
+  marker file, and **does not delete** the legacy directory (working
+  principle #10). Override env: `AGORA_STATE_DIR` >
+  `ANDROMEDA_STATE_DIR` > `LUMEN_STATE_DIR`.
+- **Discovery schema** — `agora.directory.v1` (was
+  `andromeda.directory.v1`). Parsers accept both.
+- **Service identifiers** in `/api/health` responses — `agora-registry`,
+  `agora-market-monitor`, `agora-dataset-seller`. Provider exposes both
+  `agora_pubkey` and the legacy `andromeda_pubkey` field.
+- **Dashboard SPA** — every "Andromeda" string flipped to "Agora";
+  `localStorage` keys migrated forward (`agora.controlPlane` reads
+  `andromeda.controlPlane` on first load; same for
+  `agora.allowance` / `andromeda.allowance` / `agora-theme` /
+  `andromeda-theme`).
+- **Public web index** — branding, theme key, sitemap base URL all
+  updated.
+- **Test gates** — every `scripts/test-phase*.js` either was switched
+  to canonical `agora_*` tool calls + `AGORA_*` env vars, or was
+  augmented with extra assertions that confirm legacy names still
+  resolve. `test-phase0.js` adds 4 new ADR-0013 specific assertions
+  (`packages/andromeda-core/` is gone, ADR 0013 file exists, 9 header
+  constants exported, canonical header is `x-agora-pubkey`).
+  `test-phase1b.js` asserts all 10 canonical agora_* tools, all 10
+  andromeda_* aliases, all 7 lumen_* aliases, and that BOTH X-Agora-*
+  and X-Andromeda-* tamper paths return 401.
+- **ADRs** — new ADR 0013 (rebrand). ADR 0001 + ADR 0002 each gain a
+  one-paragraph header note pointing to ADR 0013; ADR 0002's status
+  updated to "Accepted (superseded as canonical name by ADR 0013)".
+- **Root npm `name` field** — left as `lumen`, same call as ADR 0002.
+  Defended in ADR 0013 §"Root npm `name` field".
+- **Database tables / columns** — UNCHANGED. Domain terms, not branding.
+- **GitHub repo URL** — out of scope. User can rename via GitHub UI;
+  remote redirect handles existing PR / issue links.
+- **Macaroon HMAC byte-format** — UNCHANGED (frozen by ADR 0001 §Consequences).
 
 ### Phase 7 — Public web index (2026-04-26)
 

@@ -1,4 +1,4 @@
-// Andromeda — shared TypeScript types.
+// Agora — shared TypeScript types.
 //
 // These types describe data that crosses service boundaries (registry
 // ↔ providers ↔ MCP). Per-service internal types stay private.

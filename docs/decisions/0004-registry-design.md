@@ -1,5 +1,9 @@
 # ADR 0004 — Registry: Next.js + SQLite (FTS5), signed writes
 
+> **Note (post-ADR 0013):** "Andromeda registry" below is now the
+> "Agora registry". The design (Next.js + SQLite + FTS5 + Ed25519
+> signed writes) is unchanged.
+
 Status: Accepted
 Date: 2026-04-26
 

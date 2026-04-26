@@ -1,19 +1,38 @@
-# Andromeda — build summary
+# Agora — build summary
 
 Phases 0 → 7 completed. Phase 7 (public web index) was the optional
-final phase; it is now built and green.
+final phase; it is now built and green. After phase 7 the project went
+through its **second and final rebrand** — Andromeda → Agora (ADR 0013).
 
-All test gates: **PASS**. The repo's `lumen` npm name and the
-backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
+All test gates: **PASS**. The repo's `lumen` npm-root name and the
+backwards-compat tool aliases (now both `lumen_*` AND `andromeda_*`)
+survive intact.
+
+## Branding history
+
+LUMEN (initial) → Andromeda (ADR 0002) → **Agora (ADR 0013, canonical)**.
+
+| Layer | Old (Andromeda) | New (Agora) | Backward-compat |
+|---|---|---|---|
+| MCP tool prefix | `andromeda_*` | `agora_*` | Keep `andromeda_*` AND `lumen_*` as deprecated aliases |
+| Env vars | `ANDROMEDA_*` | `AGORA_*` | Read `AGORA_*` first, fall back to `ANDROMEDA_*`, then `LUMEN_*` |
+| HTTP signed-call headers | `X-Andromeda-Pubkey/Sig/Timestamp` | `X-Agora-*` | Verifier accepts EITHER family on incoming requests; outgoing requests send `X-Agora-*` only |
+| npm package | `@andromeda/core` | `@agora/core` | Renamed; all imports updated; lockfile refreshed |
+| Workspace dir | `packages/andromeda-core/` | `packages/agora-core/` | Moved; root `workspaces` updated |
+| Local state dir | `~/.andromeda/` | `~/.agora/` | One-shot copy migration; old dir preserved |
+| Discovery schema | `andromeda.directory.v1` | `agora.directory.v1` | Parser accepts both |
+| Service identifiers in `/api/health` | `andromeda-registry` etc. | `agora-registry` etc. | Just renamed |
+| Root npm `name` | `lumen` | `lumen` (unchanged — see ADR 0013) | n/a |
+| GitHub repo URL | `lumen.git` | `lumen.git` (user's call) | n/a |
 
 ## Workspaces
 
 | Path                          | Purpose                                                                |
 |-------------------------------|------------------------------------------------------------------------|
-| `packages/andromeda-core/`    | Shared TS lib: Ed25519 crypto, signed-request, types, L402 macaroon, review rubric, defaults. |
+| `packages/agora-core/`        | Shared TS lib: Ed25519 crypto, signed-request (3 header families), types, L402 macaroon, review rubric, defaults, env-fallback helper, state-dir helper. |
 | `provider/`                   | Existing Next.js 16 L402 service (vision-oracle-3): listing-verify + order-receipt. Phase 1 added self-registration; Phase 2 added subscription primitives. |
 | `buyer/`                      | Existing Node script — single-shot buyer agent.                        |
-| `mcp/`                        | PayMyAgent — stdio MCP server. Lives behind every Andromeda MCP tool. Adds the localhost control-plane in Phase 3. |
+| `mcp/`                        | PayMyAgent — stdio MCP server. Lives behind every Agora MCP tool. Adds the localhost control-plane in Phase 3. |
 | `registry/`                   | NEW (Phase 1) — Next.js 16 multi-seller catalog + tx ledger + reviews. Port 3030. |
 | `dashboard/`                  | NEW (Phase 3) — control-plane CLI shim. Tauri GUI deferred (ADR 0006). |
 | `agents/market-monitor/`      | NEW (Phase 2) — sells github-advisory subscriptions (50 sat/event). Port 3100. |
@@ -61,28 +80,14 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | POST   | `/api/v1/admin/fast-forward`                        | x-admin-secret            |
 | GET    | `/api/v1/platform/revenue`                          | x-admin-secret            |
 
-### Market-monitor (port 3100)
-| Method | Path                                                | Cost                      |
-|--------|-----------------------------------------------------|---------------------------|
-| GET    | `/api/health`                                       | free                      |
-| GET    | `/api/v1/discovery`                                 | free                      |
-| POST   | `/api/v1/subscribe`                                 | trust-deposit (mock)      |
-| GET    | `/api/v1/subscriptions/:id`                         | free                      |
-| POST   | `/api/v1/subscriptions/:id/topup`                   | mock-paid                 |
-| POST   | `/api/v1/subscriptions/:id/cancel`                  | free (refund)             |
-| GET    | `/api/v1/subscriptions/:id/alerts?since=`           | free                      |
-| POST   | `/api/dev/fire-alert`                               | mock-only                 |
-| POST   | `/api/dev/tick`                                     | mock-only                 |
+Every Ed25519-signed endpoint accepts `X-Agora-*` (canonical),
+`X-Andromeda-*`, AND `X-Lumen-*` header families on incoming requests.
+Outgoing requests emit only `X-Agora-*`.
 
-### Dataset-seller (port 3200)
-| Method | Path                                                | Cost                      |
-|--------|-----------------------------------------------------|---------------------------|
-| GET    | `/api/health`                                       | free                      |
-| GET    | `/api/v1/discovery`                                 | free                      |
-| GET    | `/api/v1/dataset/:id/preview`                       | free                      |
-| POST   | `/api/v1/dataset/:id/purchase`                      | **L402, 5000 sat**        |
-| GET    | `/api/v1/dataset/:id/download?signed_url=`          | signed-URL only (24h)     |
-| POST   | `/api/dev/pay`                                      | mock-only                 |
+### Market-monitor (port 3100), Dataset-seller (port 3200)
+Unchanged from previous summary; the only rebrand-visible edit is the
+`service` field in `/api/health` (`agora-market-monitor`,
+`agora-dataset-seller`) and the discovery schema (`agora.directory.v1`).
 
 ### MCP control plane (port: random, 127.0.0.1 only)
 | Method | Path                       | Auth          |
@@ -92,57 +97,65 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | POST   | `/session/budget`          | Bearer token  |
 | POST   | `/session/kill-switch`     | Bearer token  |
 | GET    | `/events` (SSE)            | Bearer token  |
+| GET    | `/balance`                 | Bearer token  |
+| GET    | `/transactions`            | Bearer token  |
+| GET    | `/subscriptions`           | Bearer token  |
+| POST   | `/subscriptions/:id/cancel`| Bearer token  |
+| GET    | `/sellers`                 | Bearer token  |
+
+The control-plane port + token files now live at `~/.agora/control-port`
++ `~/.agora/control-token` (with one-shot migration from
+`~/.andromeda/`).
 
 ### Public web index (port 3300) — read-only, no API
-| Method | Path                                | What it shows                                  |
-|--------|-------------------------------------|------------------------------------------------|
-| GET    | `/`                                 | Hero, headline stats, featured services, how-it-works |
-| GET    | `/sellers`                          | Paginated seller list, sort + name filter      |
-| GET    | `/sellers/:pubkey`                  | Seller detail: services, badges, activity      |
-| GET    | `/services`                         | Service catalog with type/price/honor filters  |
-| GET    | `/services/:id`                     | Service detail + similar (via /recommend)      |
-| GET    | `/search?q=`                        | FTS5-backed search (delegates to registry)     |
-| GET    | `/recommend?intent=`                | Orchestrator score breakdown                   |
-| GET    | `/sitemap.xml`                      | Auto-enumerated from registry                  |
-| GET    | `/robots.txt`                       | Permissive (someday-deployable)                |
+Unchanged. Branding text updated to "Agora".
 
 ## MCP tools
 
-| Canonical name                          | Deprecated alias    | Cost             | What it does                                     |
-|-----------------------------------------|---------------------|------------------|--------------------------------------------------|
-| `andromeda_status`                      | `lumen_status`      | free             | Wallet mode, budget, registry & provider URL     |
-| `andromeda_discover`                    | `lumen_discover`    | free             | Catalog of the connected single provider         |
-| `andromeda_balance`                     | `lumen_balance`     | free             | Wallet balance via NWC                           |
-| `andromeda_set_budget`                  | `lumen_set_budget`  | free             | Reset per-session sat cap                        |
-| `andromeda_verify_listing`              | `lumen_verify_listing` | ~240 sat       | OSM-geocoded listing verification                |
-| `andromeda_file_receipt`                | `lumen_file_receipt`   | ~120 sat       | Signed delivery receipt                          |
-| `andromeda_fetch_receipt`               | `lumen_fetch_receipt`  | free           | Replay an existing receipt                       |
-| `andromeda_search_services`             | —                   | free             | Cross-seller FTS5 search                         |
-| `andromeda_list_sellers`                | —                   | free             | Paginated seller list                            |
-| `andromeda_discover_all`                | —                   | free             | Cross-seller catalog                             |
-| `andromeda_recommend`                   | —                   | free             | Orchestrator with explainable score breakdown    |
-| `andromeda_subscribe`                   | —                   | mock-deposit     | Open prepaid subscription                        |
-| `andromeda_list_subscriptions`          | —                   | free             | List subscriptions tracked by this MCP           |
-| `andromeda_check_alerts`                | —                   | free             | Poll alerts since last watermark                 |
-| `andromeda_topup_subscription`          | —                   | mock-deposit     | Add sats to a subscription                       |
-| `andromeda_cancel_subscription`         | —                   | refund           | Cancel; refund unused balance                    |
-| `andromeda_rate_seller`                 | —                   | free (signed)    | 1-5 star buyer rating; honor +/-                 |
-| `andromeda_request_review`              | —                   | escrow           | Open peer review with escrow                     |
-| `andromeda_set_reviewer_availability`   | —                   | free (signed)    | Mark this identity as a reviewer                 |
-| `andromeda_check_review_assignments`    | —                   | free             | List pending review assignments                  |
-| `andromeda_submit_review`               | —                   | free (signed)    | Submit rubric review (escrow split 95/5)         |
-| `andromeda_browse_datasets`             | —                   | free             | List type=dataset services                       |
-| `andromeda_purchase_dataset`            | —                   | 5000 sat (NOAA)  | L402-paywalled dataset purchase, signed URL DL   |
-| `andromeda_list_datasets`               | —                   | free             | List `~/.andromeda/datasets/`                    |
+23 canonical `agora_*` tools + 14 deprecated aliases (`andromeda_*` for
+all 23, `lumen_*` for the original 7) = **37 registered names** routing
+to **23 unique handlers**.
 
-7 deprecated `lumen_*` aliases + 23 canonical `andromeda_*` tools = **30 total** (24 unique handlers).
+### Phase 0 / 1 — original 7 (have ALL THREE name families)
+
+| Canonical                   | Deprecated aliases                                      | Cost              |
+|-----------------------------|---------------------------------------------------------|-------------------|
+| `agora_status`              | `andromeda_status`, `lumen_status`                      | free              |
+| `agora_discover`            | `andromeda_discover`, `lumen_discover`                  | free              |
+| `agora_balance`             | `andromeda_balance`, `lumen_balance`                    | free              |
+| `agora_set_budget`          | `andromeda_set_budget`, `lumen_set_budget`              | free              |
+| `agora_verify_listing`      | `andromeda_verify_listing`, `lumen_verify_listing`      | ~240 sat          |
+| `agora_file_receipt`        | `andromeda_file_receipt`, `lumen_file_receipt`          | ~120 sat          |
+| `agora_fetch_receipt`       | `andromeda_fetch_receipt`, `lumen_fetch_receipt`        | free              |
+
+### Phase 1+ — only AGORA + ANDROMEDA family
+
+| Canonical                              | Deprecated alias                          | Cost             |
+|----------------------------------------|-------------------------------------------|------------------|
+| `agora_search_services`                | `andromeda_search_services`               | free             |
+| `agora_list_sellers`                   | `andromeda_list_sellers`                  | free             |
+| `agora_discover_all`                   | `andromeda_discover_all`                  | free             |
+| `agora_recommend`                      | `andromeda_recommend`                     | free             |
+| `agora_subscribe`                      | `andromeda_subscribe`                     | mock-deposit     |
+| `agora_list_subscriptions`             | `andromeda_list_subscriptions`            | free             |
+| `agora_check_alerts`                   | `andromeda_check_alerts`                  | free             |
+| `agora_topup_subscription`             | `andromeda_topup_subscription`            | mock-deposit     |
+| `agora_cancel_subscription`            | `andromeda_cancel_subscription`           | refund           |
+| `agora_rate_seller`                    | `andromeda_rate_seller`                   | free (signed)    |
+| `agora_request_review`                 | `andromeda_request_review`                | escrow           |
+| `agora_set_reviewer_availability`      | `andromeda_set_reviewer_availability`     | free (signed)    |
+| `agora_check_review_assignments`       | `andromeda_check_review_assignments`      | free             |
+| `agora_submit_review`                  | `andromeda_submit_review`                 | free (signed)    |
+| `agora_browse_datasets`                | `andromeda_browse_datasets`               | free             |
+| `agora_purchase_dataset`               | `andromeda_purchase_dataset`              | 5000 sat (NOAA)  |
+| `agora_list_datasets`                  | `andromeda_list_datasets`                 | free             |
 
 ## ADRs
 
 | ID  | Title                                                        | Status   |
 |-----|--------------------------------------------------------------|----------|
-| 0001| Architecture overview & working principles                   | Accepted |
-| 0002| Rebrand LUMEN → Andromeda                                    | Accepted |
+| 0001| Architecture overview & working principles                   | Accepted (header note refers to ADR 0013) |
+| 0002| Rebrand LUMEN → Andromeda                                    | Accepted (superseded as canonical name by ADR 0013) |
 | 0003| Workspace tool: npm workspaces                               | Accepted |
 | 0004| Registry: Next.js + SQLite (FTS5), signed writes             | Accepted |
 | 0005| Subscriptions: prepaid balance, polled alerts                | Accepted |
@@ -151,6 +164,7 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 | 0008| Dataset seller + platform fee                                | Accepted |
 | 0010| Honor & peer review                                          | Accepted |
 | 0012| Public web index (Next.js + RSC, 7 pages, port 3300)         | Accepted |
+| 0013| Rebrand Andromeda → Agora (final project name)               | Accepted |
 
 (0009 was reserved for honor primitives but folded into 0010.
 0011 unused.)
@@ -161,42 +175,29 @@ backwards-compat `lumen_*` MCP tool aliases survive intact (ADR 0002).
 |---------------------------------|---------------|
 | `scripts/preflight.js`          | (legacy, intact) |
 | `scripts/test-phase1.js`        | (legacy single-provider, intact) |
-| `scripts/test-mcp.js`           | **PASS · 12/12** (regression check, kept green throughout) |
-| `scripts/test-phase0.js`        | **PASS · 12/12** |
-| `scripts/test-phase1b.js`       | **PASS · 16/16** |
-| `scripts/test-phase2.js`        | **PASS · 12/12** |
-| `scripts/test-phase3.js`        | **PASS · 12/12** |
-| `scripts/test-phase4.js`        | **PASS · 11/11** |
-| `scripts/test-phase5.js`        | **PASS · 16/16** |
-| `scripts/test-phase6.js`        | **PASS · 10/10** |
-| `scripts/test-phase7.js`        | **PASS · 14/14** |
-
-Total green checks across new gates: **115/115**.
+| `scripts/test-mcp.js`           | **PASS** (legacy regression — uses `lumen_*` aliases on purpose) |
+| `scripts/test-phase0.js`        | **PASS** — adds 4 ADR-0013 specific assertions |
+| `scripts/test-phase1b.js`       | **PASS** — asserts canonical `agora_*` AND legacy `andromeda_*` AND legacy `lumen_*`; both `X-Agora-*` and `X-Andromeda-*` tamper paths return 401 |
+| `scripts/test-phase2.js`        | **PASS** — canonical + alias subscription tools |
+| `scripts/test-phase3.js`        | **PASS** — control plane on `~/.agora/`; legacy `~/.andromeda/` migration verified |
+| `scripts/test-phase3-ui.js`     | **PASS** — dashboard build + 5 control-plane proxies |
+| `scripts/test-phase4.js`        | **PASS** — `agora_recommend` canonical + `andromeda_recommend` alias smoke test |
+| `scripts/test-phase5.js`        | **PASS** — review rubric, escrow split, decay |
+| `scripts/test-phase6.js`        | **PASS** — `agora_purchase_dataset` 5000 sat + 100 sat platform fee |
+| `scripts/test-phase7.js`        | **PASS** — public web index, 7 pages, sitemap, robots |
 
 ## Known limitations (honest)
 
-1. **Tauri GUI is a stub.** Phase 3 ships only the headless control plane.
-   `dashboard/` runs a CLI placeholder; the Tauri 2.x React shell is
-   future work. ADR 0006.
-2. **Embeddings are a hashing-based pseudo-embedder.** Good enough for
-   the in-repo corpus and the explicit Phase-4 test; a one-function swap
-   to `@xenova/transformers` + `Xenova/bge-small-en-v1.5` is the upgrade
-   path. ADR 0007.
-3. **Phase-2 subscribe trust-deposits.** The provider's `POST /api/v1/subscribe`
-   doesn't issue a real L402 challenge for the deposit (the market-monitor
-   agent uses the same trust-deposit pattern). Real-mode payment for
-   subscription opens is deferred — the alert-charging mechanism IS
-   correct.
-4. **Phase-5 buyer-side fraud slashing isn't implemented.** ADR 0010
-   flagged it; the test gate exercises reviewer-side slashing only.
-5. **Phase-5 silent re-review sampling isn't running.** The dispute path
-   slashes on demand based on user input, not on automated detection.
-   This is a v0 trade-off captured in ADR 0010.
-6. **Two-step Lightning settlement to a platform NWC is mock-only.** The
-   `total_fee_sats` is a counter; an actual NWC payout to the platform
-   is deferred (ADR 0008).
-7. **Buyer subscription cancel-refund in real mode is not wired.** Mock
-   zeroes the balance counter; real-mode NWC payback is deferred.
+(Same as previous summary. The rebrand did not introduce any new gaps.)
+
+1. **Tauri GUI is a stub.** ADR 0006.
+2. **Embeddings are a hashing-based pseudo-embedder.** ADR 0007.
+3. **Phase-2 subscribe trust-deposits.** Real-mode payment for
+   subscription opens is deferred.
+4. **Phase-5 buyer-side fraud slashing isn't implemented.** ADR 0010.
+5. **Phase-5 silent re-review sampling isn't running.** ADR 0010.
+6. **Two-step Lightning settlement to a platform NWC is mock-only.** ADR 0008.
+7. **Buyer subscription cancel-refund in real mode is not wired.**
 8. **Existing `npm run test:phase1.js` (single-provider, legacy) is
    untouched.** It still tests the original L402 flow and will pass
    even after rebrand because the existing endpoints / macaroon format
@@ -204,34 +205,33 @@ Total green checks across new gates: **115/115**.
 
 ## Phases skipped
 
-None. Phases 0–7 all completed. (Earlier drafts of this document had
-Phase 7 marked skipped.)
+None. Phases 0–7 + the second rebrand all completed.
 
 ## Build blockers
 
 None encountered. Every retry succeeded on first or second attempt.
-No `docs/BUILD-BLOCKERS.md` was needed.
 
 ## How to run end-to-end
 
 ```bash
-# Re-install workspaces
+# Re-install workspaces (pulls in @agora/core)
 npm install
 
 # Build the shared core (required because dist/ is gitignored)
-cd packages/andromeda-core && npx tsc -p tsconfig.json && cd ../..
+cd packages/agora-core && npx tsc -p tsconfig.json && cd ../..
 
 # Run all phase tests sequentially (each spawns / kills its own services)
-npm run test:phase0    # 12/12
-npm run test:phase1b   # 16/16
-npm run test:phase2    # 12/12
-npm run test:phase3    # 12/12
-npm run test:phase4    # 11/11
-npm run test:phase5    # 16/16
-npm run test:phase6    # 10/10
-npm run test:phase7    # 14/14 (requires registry already running on 3030)
-npm run test:mcp       # 12/12 (legacy regression)
+npm run test:phase0
+npm run test:phase1b
+npm run test:phase2
+npm run test:phase3
+npm run test:phase4
+npm run test:phase5
+npm run test:phase6
+npm run test:phase7      # requires registry already running on 3030
+npm run test:mcp         # legacy regression (still uses lumen_* aliases)
+npm run test:phase3-ui   # dashboard SPA + control-plane proxies
 ```
 
-Mock mode is the default everywhere. Real-mode requires NWC
-strings in `provider/.env.local`, `buyer/.env`, and `mcp/.env`.
+Mock mode is the default everywhere. Real-mode requires NWC strings in
+`provider/.env.local`, `buyer/.env`, and `mcp/.env`.

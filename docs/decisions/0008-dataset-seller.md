@@ -1,5 +1,8 @@
 # ADR 0008 — Dataset seller + platform fee
 
+> **Note (post-ADR 0013):** "Andromeda" branding below is now "Agora".
+> The fee design (2% platform fee, 5000 sat NOAA dataset) is unchanged.
+
 Status: Accepted
 Date: 2026-04-26
 

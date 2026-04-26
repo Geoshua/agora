@@ -10,7 +10,7 @@
 //   3. max_price_sats=100 excludes pricier services with reason
 //      "no service within price".
 //   4. Every result has {intent_match, honor_normalized, price_fit, score}.
-//   5. The MCP tool andromeda_recommend exposes the same.
+//   5. The MCP tool agora_recommend (canonical) and andromeda_recommend (legacy alias) both expose the same.
 
 import { spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -136,28 +136,37 @@ async function main() {
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_REGISTRY_URL: "http://localhost:3030",
-        ANDROMEDA_PROVIDER_URL: "http://localhost:3000",
+        AGORA_REGISTRY_URL: "http://localhost:3030",
+        AGORA_PROVIDER_URL: "http://localhost:3000",
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",
-        ANDROMEDA_CONTROL_PLANE: "off",
+        AGORA_CONTROL_PLANE: "off",
       },
       cwd: path.join(REPO, "mcp"),
     });
     const client = new Client({ name: "phase4-probe", version: "0.1.0" }, { capabilities: {} });
     await client.connect(transport);
     const tools = await client.listTools();
-    if (tools.tools.some(t => t.name === "andromeda_recommend")) ok(`MCP tool andromeda_recommend registered`);
-    else ko(`andromeda_recommend missing`);
+    if (tools.tools.some(t => t.name === "agora_recommend")) ok(`MCP tool agora_recommend (canonical) registered`);
+    else ko(`agora_recommend missing`);
+    if (tools.tools.some(t => t.name === "andromeda_recommend")) ok(`MCP tool andromeda_recommend (legacy alias) still registered`);
+    else ko(`andromeda_recommend alias missing`);
 
     const parse = (res) => res.structuredContent ?? (res.content?.[0]?.text ? JSON.parse(res.content[0].text) : {});
     const mr = parse(await client.callTool({
+      name: "agora_recommend",
+      arguments: { intent: "watch for security advisories" },
+    }));
+    if (mr.ok && mr.results?.length >= 1) ok(`agora_recommend MCP call returns ${mr.results.length} results`);
+    else ko(`MCP recommend: ${JSON.stringify(mr).slice(0, 200)}`);
+    // Smoke: legacy alias still works (one call to confirm shared handler).
+    const mrLegacy = parse(await client.callTool({
       name: "andromeda_recommend",
       arguments: { intent: "watch for security advisories" },
     }));
-    if (mr.ok && mr.results?.length >= 1) ok(`andromeda_recommend MCP call returns ${mr.results.length} results`);
-    else ko(`MCP recommend: ${JSON.stringify(mr).slice(0, 200)}`);
+    if (mrLegacy.ok && mrLegacy.results?.length >= 1) ok(`andromeda_recommend (legacy alias) still works`);
+    else ko(`legacy MCP recommend: ${JSON.stringify(mrLegacy).slice(0, 200)}`);
 
     await client.close();
   } finally {

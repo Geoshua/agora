@@ -71,12 +71,12 @@ async function main() {
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_REGISTRY_URL: "http://localhost:3030",
-        ANDROMEDA_PROVIDER_URL: "http://localhost:3000",
+        AGORA_REGISTRY_URL: "http://localhost:3030",
+        AGORA_PROVIDER_URL: "http://localhost:3000",
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",
-        ANDROMEDA_CONTROL_PLANE: "off",
+        AGORA_CONTROL_PLANE: "off",
       },
       cwd: path.join(REPO, "mcp"),
     });
@@ -129,14 +129,14 @@ async function main() {
       args: [path.join(REPO, "mcp", "server.js")],
       env: {
         ...process.env,
-        ANDROMEDA_REGISTRY_URL: "http://localhost:3030",
-        ANDROMEDA_PROVIDER_URL: "http://localhost:3000",
+        AGORA_REGISTRY_URL: "http://localhost:3030",
+        AGORA_PROVIDER_URL: "http://localhost:3000",
         MOCK_MODE: "true",
         MAX_PRICE_SATS: "1000",
         MAX_BUDGET_SATS: "5000",
-        ANDROMEDA_CONTROL_PLANE: "off",
-        ANDROMEDA_BUYER_PRIVKEY: reqPriv,
-        ANDROMEDA_MCP_STATE_PATH: path.join(REPO, ".mcp-session-requester.json"),
+        AGORA_CONTROL_PLANE: "off",
+        AGORA_BUYER_PRIVKEY: reqPriv,
+        AGORA_MCP_STATE_PATH: path.join(REPO, ".mcp-session-requester.json"),
       },
       cwd: path.join(REPO, "mcp"),
     });
@@ -218,7 +218,7 @@ async function main() {
     const review_id = sub.review_id;
 
     // Dispute (signed by the requester).
-    const { signRequest } = await import(pathToFileURL(path.join(REPO, "node_modules", "@andromeda", "core", "dist", "index.js")).href);
+    const { signRequest } = await import(pathToFileURL(path.join(REPO, "node_modules", "@agora", "core", "dist", "index.js")).href);
     const disputeBody = JSON.stringify({ reason: "fraudulent ratings (test)", evidence: { test: true } });
     const disputeHeaders = await signRequest({
       method: "POST", path: `/api/v1/reviews/${review_id}/dispute`, body: disputeBody,
@@ -260,12 +260,16 @@ async function main() {
     if (honorBefore !== 0 && Math.abs(honorAfter - honorBefore * 0.9) < 0.001) ok(`honor decayed: ${honorBefore} → ${honorAfter} (×0.9)`);
     else ko(`decay value wrong: before=${honorBefore} after=${honorAfter}`);
 
-    // Required tools registered
+    // Required tools registered — canonical agora_* AND legacy andromeda_* aliases (ADR 0013)
     const tools = await buyer.listTools();
-    const required = ["andromeda_rate_seller", "andromeda_request_review", "andromeda_set_reviewer_availability", "andromeda_check_review_assignments", "andromeda_submit_review"];
-    const missing = required.filter(n => !tools.tools.some(t => t.name === n));
-    if (missing.length === 0) ok(`all 5 review tools registered`);
-    else ko(`missing: ${missing.join(",")}`);
+    const requiredCanonical = ["agora_rate_seller", "agora_request_review", "agora_set_reviewer_availability", "agora_check_review_assignments", "agora_submit_review"];
+    const requiredAlias = ["andromeda_rate_seller", "andromeda_request_review", "andromeda_set_reviewer_availability", "andromeda_check_review_assignments", "andromeda_submit_review"];
+    const missingCanon = requiredCanonical.filter(n => !tools.tools.some(t => t.name === n));
+    const missingAlias = requiredAlias.filter(n => !tools.tools.some(t => t.name === n));
+    if (missingCanon.length === 0) ok(`all 5 canonical agora_* review tools registered`);
+    else ko(`missing canonical: ${missingCanon.join(",")}`);
+    if (missingAlias.length === 0) ok(`all 5 legacy andromeda_* review aliases registered`);
+    else ko(`missing alias: ${missingAlias.join(",")}`);
 
     await buyer.close();
     await requester.close();

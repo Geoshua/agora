@@ -1,16 +1,16 @@
 {
-  "name": "@andromeda/registry",
-  "version": "0.1.0",
+  "name": "@agora/registry",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda registry — multi-seller catalog, transaction ledger, peer-review escrow.",
+  "description": "Agora registry — multi-seller catalog, transaction ledger, peer-review escrow.",
   "scripts": {
     "dev": "next dev -p 3030",
     "build": "next build",
     "start": "next start -p 3030"
   },
   "dependencies": {
-    "@andromeda/core": "*",
+    "@agora/core": "*",
     "better-sqlite3": "^12.9.0",
     "next": "16.2.4",
     "react": "19.2.4",

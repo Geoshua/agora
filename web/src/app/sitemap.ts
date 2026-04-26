@@ -1,7 +1,10 @@
 import type { MetadataRoute } from "next";
 import { listSellers, listServices } from "@/lib/registry";
 
-const BASE_URL = process.env.ANDROMEDA_WEB_URL ?? "http://localhost:3300";
+const BASE_URL =
+  process.env.AGORA_WEB_URL ??
+  process.env.ANDROMEDA_WEB_URL ??
+  "http://localhost:3300";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [sellers, services] = await Promise.all([

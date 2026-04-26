@@ -1,7 +1,15 @@
 # ADR 0002 — Rebrand LUMEN → Andromeda
 
-Status: Accepted
+Status: Accepted (superseded as canonical name by ADR 0013)
 Date: 2026-04-26
+
+> **Note (2026-04-26, post-ADR 0013):** Andromeda has since been renamed
+> to **Agora**. The rebrand pattern this ADR established (canonical name
+> + deprecated alias, additive only) was applied a second time. See
+> ADR 0013. The `lumen_*` MCP tool aliases and `LUMEN_*` env-var
+> fallbacks documented here are still alive but are now joined by
+> `andromeda_*` / `ANDROMEDA_*` as a second family of deprecated
+> aliases.
 
 ## Context
 

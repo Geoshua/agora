@@ -79,7 +79,7 @@ export default async function SellersPage(props: {
           <h1 className="font-serif text-3xl mt-1">Sellers</h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1">
             {total} {total === 1 ? "seller" : "sellers"} registered with the
-            Andromeda registry.
+            Agora registry.
           </p>
         </div>
         <Toolbar sort={sort} q={q} />
@@ -209,7 +209,7 @@ function ErrorBlock() {
       </p>
       <p>
         Could not load sellers from the registry. Check that the registry is
-        running on <code>{process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030"}</code>.
+        running on <code>{process.env.AGORA_REGISTRY_URL ?? process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030"}</code>.
       </p>
     </div>
   );

@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────
-//  Thin LUMEN HTTP client used by the MCP server.
+//  Thin Agora HTTP client used by the MCP server. (File name retained
+//  as `lumen-client.js` for backwards-compat with relative imports.)
 //
 //  Owns one shared LNClient (Alby NWC) for the session.  Every paid
 //  tool calls callPaidEndpoint(path, args) — does the 402, parses the
@@ -17,13 +18,18 @@ import { reserve, confirm } from "./budget.js";
 import { tryBuyerIdentity } from "./identity.js";
 import { appendTransaction } from "./transactions-log.js";
 
-// New env name first, legacy fallback per ADR 0002.
+// AGORA_* first, then ANDROMEDA_*, then LUMEN_* (ADR 0013 / 0002).
 export const PROVIDER =
+  process.env.AGORA_PROVIDER_URL ??
   process.env.ANDROMEDA_PROVIDER_URL ??
   process.env.LUMEN_PROVIDER_URL ??
   process.env.PROVIDER_URL ??
   "http://localhost:3000";
-export const REGISTRY = process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030";
+export const REGISTRY =
+  process.env.AGORA_REGISTRY_URL ??
+  process.env.ANDROMEDA_REGISTRY_URL ??
+  process.env.LUMEN_REGISTRY_URL ??
+  "http://localhost:3030";
 export const MOCK = process.env.MOCK_MODE === "true";
 export const MAX_PRICE_SATS = parseInt(process.env.MAX_PRICE_SATS ?? "4000", 10);
 
@@ -45,7 +51,9 @@ export async function callPaidEndpoint(path, args) {
   // attributable transaction in the registry. Not strictly required
   // (anonymous buyers still work).
   const id = tryBuyerIdentity();
-  const buyerHeader = id ? { "x-andromeda-pubkey": id.pubkey } : {};
+  // Canonical header is x-agora-pubkey (ADR 0013); receivers also accept
+  // the legacy x-andromeda-pubkey + x-lumen-pubkey families.
+  const buyerHeader = id ? { "x-agora-pubkey": id.pubkey } : {};
 
   const r = await fetch(`${PROVIDER}${path}`, {
     method: "POST",
