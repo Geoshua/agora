@@ -1,0 +1,33 @@
+{
+  "dataset_id": "noaa-pnw-2015-2025",
+  "name": "NOAA weather archive: US Pacific Northwest 2015–2025",
+  "description": "Hourly observations from NOAA stations across Washington, Oregon, and Northern California, 2015-01-01 → 2025-12-31. Includes temperature, precipitation, wind speed/direction, station_id, and lat/lon. ~200 MB Parquet in real mode; mock fixture is the first 100 rows.",
+  "source": "https://www.ncei.noaa.gov/data/global-hourly/access/",
+  "license": "CC0 / public domain",
+  "row_count": 9852344,
+  "size_bytes": 209715200,
+  "schema": [
+    { "name": "station_id", "type": "string" },
+    { "name": "ts_utc", "type": "timestamp[ns]" },
+    { "name": "lat", "type": "double" },
+    { "name": "lon", "type": "double" },
+    { "name": "temp_c", "type": "double" },
+    { "name": "precip_mm", "type": "double" },
+    { "name": "wind_speed_mps", "type": "double" },
+    { "name": "wind_dir_deg", "type": "double" },
+    { "name": "elevation_m", "type": "double" }
+  ],
+  "preview_rows": [
+    { "station_id": "KSEA", "ts_utc": "2015-01-01T00:00:00Z", "lat": 47.4502, "lon": -122.3088, "temp_c": 4.4, "precip_mm": 0.0, "wind_speed_mps": 2.1, "wind_dir_deg": 180, "elevation_m": 132 },
+    { "station_id": "KPDX", "ts_utc": "2015-01-01T00:00:00Z", "lat": 45.5887, "lon": -122.5975, "temp_c": 5.6, "precip_mm": 0.2, "wind_speed_mps": 3.0, "wind_dir_deg": 195, "elevation_m": 12 },
+    { "station_id": "KSFO", "ts_utc": "2015-01-01T00:00:00Z", "lat": 37.6213, "lon": -122.3790, "temp_c": 8.9, "precip_mm": 0.0, "wind_speed_mps": 1.5, "wind_dir_deg": 270, "elevation_m": 4 },
+    { "station_id": "KSEA", "ts_utc": "2015-01-01T01:00:00Z", "lat": 47.4502, "lon": -122.3088, "temp_c": 4.2, "precip_mm": 0.0, "wind_speed_mps": 2.0, "wind_dir_deg": 178, "elevation_m": 132 },
+    { "station_id": "KPDX", "ts_utc": "2015-01-01T01:00:00Z", "lat": 45.5887, "lon": -122.5975, "temp_c": 5.4, "precip_mm": 0.3, "wind_speed_mps": 2.9, "wind_dir_deg": 200, "elevation_m": 12 },
+    { "station_id": "KSEA", "ts_utc": "2015-01-01T02:00:00Z", "lat": 47.4502, "lon": -122.3088, "temp_c": 4.0, "precip_mm": 0.1, "wind_speed_mps": 1.9, "wind_dir_deg": 175, "elevation_m": 132 },
+    { "station_id": "KSEA", "ts_utc": "2024-12-31T22:00:00Z", "lat": 47.4502, "lon": -122.3088, "temp_c": 1.1, "precip_mm": 0.0, "wind_speed_mps": 4.5, "wind_dir_deg": 90, "elevation_m": 132 },
+    { "station_id": "KPDX", "ts_utc": "2024-12-31T22:00:00Z", "lat": 45.5887, "lon": -122.5975, "temp_c": 2.2, "precip_mm": 0.4, "wind_speed_mps": 3.8, "wind_dir_deg": 110, "elevation_m": 12 },
+    { "station_id": "KSFO", "ts_utc": "2024-12-31T23:00:00Z", "lat": 37.6213, "lon": -122.3790, "temp_c": 9.4, "precip_mm": 0.0, "wind_speed_mps": 2.0, "wind_dir_deg": 280, "elevation_m": 4 },
+    { "station_id": "KSEA", "ts_utc": "2025-12-31T23:00:00Z", "lat": 47.4502, "lon": -122.3088, "temp_c": -0.5, "precip_mm": 1.2, "wind_speed_mps": 5.2, "wind_dir_deg": 80, "elevation_m": 132 }
+  ],
+  "preview_note": "10 representative rows shown for the demo. The mock-mode 'full' file is generated synthetically by the seller and is the same shape; the real-mode dataset is the genuine 200 MB Parquet."
+}

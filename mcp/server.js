@@ -577,6 +577,146 @@ server.registerTool(
   },
 );
 
+// ─── Phase 6 — dataset tools ──────────────────────────────────────────
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const DATASETS_DIR = path.join(os.homedir(), ".andromeda", "datasets");
+
+server.registerTool(
+  "andromeda_browse_datasets",
+  {
+    title: "Andromeda — browse datasets",
+    description:
+      "Lists all type=dataset services across registered Andromeda sellers, with provenance, " +
+      "row count, size, and a free preview endpoint. Free.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const r = await registry.listServices({ type: "dataset" });
+      return ok({ services: r.services, count: r.count });
+    } catch (e) { return fail(`browse_datasets failed: ${e.message}`); }
+  },
+);
+
+server.registerTool(
+  "andromeda_purchase_dataset",
+  {
+    title: "Andromeda — purchase a dataset",
+    description:
+      "Pays the L402 paywall for a dataset, downloads it via the signed URL the seller returns, " +
+      "and writes it to ~/.andromeda/datasets/<dataset_id>. Spends sats unless MOCK_MODE=true.",
+    inputSchema: {
+      seller_pubkey: z.string().min(1),
+      dataset_id: z.string().min(1),
+      save_path: z.string().optional().describe("Override save location"),
+    },
+  },
+  async ({ seller_pubkey, dataset_id, save_path }) => {
+    try {
+      const sellerUrl = await registry.sellerUrl(seller_pubkey);
+      if (!sellerUrl) return fail(`unknown seller: ${seller_pubkey}`);
+      // Use callPaidEndpoint? It targets PROVIDER, not the seller URL.
+      // We need a one-off paid call to a different host. Inline implement.
+      const purchasePath = `/api/v1/dataset/${encodeURIComponent(dataset_id)}/purchase`;
+      const id = tryBuyerIdentity();
+      const buyerHeader = id ? { "x-andromeda-pubkey": id.pubkey } : {};
+
+      const r = await fetch(`${sellerUrl}${purchasePath}`, {
+        method: "POST", headers: { "content-type": "application/json", ...buyerHeader },
+        body: JSON.stringify({}),
+      });
+      if (r.status !== 402) return fail(`expected 402, got ${r.status}`);
+      const challenge = await r.json();
+      if (challenge.amount_sats > MAX_PRICE_SATS) {
+        return fail(`refused: invoice ${challenge.amount_sats} > MAX_PRICE_SATS ${MAX_PRICE_SATS}`);
+      }
+      const reason = (await import("./budget.js")).reserve(challenge.amount_sats);
+      if (reason) return fail(`refused: ${reason}`);
+
+      // Pay (mock or real). For mock: just compute the preimage from the
+      // local store IF it's the provider's URL; but here it's the seller's
+      // own URL. Mock mode in dataset-seller stores invoices in-memory and
+      // doesn't expose /api/dev/pay — but it accepts ANY preimage that
+      // hashes to payment_hash. So we'd need a way to retrieve it.
+      // Workaround: dataset-seller's mock invoices use deterministic
+      // preimages via the macaroon's payment_hash. Look up the invoice
+      // map exposed as /api/dev/pay-by-hash on the seller in mock mode.
+      let preimage;
+      if (MOCK) {
+        // Try seller's local mock pay endpoint; fall back to error.
+        const payR = await fetch(`${sellerUrl}/api/dev/pay`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ payment_hash: challenge.payment_hash }),
+        });
+        if (payR.ok) {
+          preimage = (await payR.json()).preimage;
+        } else {
+          return fail(`mock pay not exposed by seller (${sellerUrl}). Seller must implement /api/dev/pay.`);
+        }
+      } else {
+        return fail(`real-mode dataset payment not implemented in MCP yet (NWC route)`);
+      }
+      (await import("./budget.js")).confirm(challenge.amount_sats);
+
+      // Replay
+      const r2 = await fetch(`${sellerUrl}${purchasePath}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": `L402 ${challenge.macaroon}:${preimage}`,
+          ...buyerHeader,
+        },
+        body: JSON.stringify({}),
+      });
+      const j2 = await r2.json();
+      if (!r2.ok || !j2.ok) return fail(`purchase replay: ${JSON.stringify(j2).slice(0, 200)}`);
+
+      // Download
+      const dlR = await fetch(j2.signed_url);
+      if (!dlR.ok) return fail(`download failed: ${dlR.status}`);
+      const data = await dlR.text();
+
+      // Save
+      try { fs.mkdirSync(DATASETS_DIR, { recursive: true, mode: 0o700 }); } catch {}
+      const savePath = save_path ?? path.join(DATASETS_DIR, `${dataset_id}.json`);
+      fs.writeFileSync(savePath, data);
+
+      return ok({
+        dataset_id, seller_pubkey, save_path: savePath,
+        bytes_written: Buffer.byteLength(data),
+        spent_sats: j2.amount_sats_paid,
+        platform_fee_sats: j2.platform_fee_sats,
+      });
+    } catch (e) { return fail(`purchase_dataset failed: ${e.message}`); }
+  },
+);
+
+server.registerTool(
+  "andromeda_list_datasets",
+  {
+    title: "Andromeda — list locally-saved datasets",
+    description: "Lists files under ~/.andromeda/datasets/. Free.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      let entries = [];
+      try {
+        entries = fs.readdirSync(DATASETS_DIR).map(name => {
+          const fp = path.join(DATASETS_DIR, name);
+          const st = fs.statSync(fp);
+          return { name, path: fp, size_bytes: st.size, modified: st.mtime.toISOString() };
+        });
+      } catch {}
+      return ok({ datasets_dir: DATASETS_DIR, datasets: entries, count: entries.length });
+    } catch (e) { return fail(e.message); }
+  },
+);
+
 // ─── connect ──────────────────────────────────────────────────────────
 async function main() {
   // Generate buyer keypair if missing. We await this so paid tools

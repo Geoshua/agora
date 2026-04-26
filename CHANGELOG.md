@@ -2,6 +2,25 @@
 
 ## Unreleased — Andromeda
 
+### Phase 6 — Dataset seller + platform fee (2026-04-26)
+
+- New workspace `agents/dataset-seller/` (port 3200). Sells one
+  dataset: `noaa-pnw-2015-2025` (NOAA Pacific-Northwest weather archive
+  2015–2025) for 5000 sat. L402-paywalled purchase returns a 24h
+  HMAC-signed download URL. Free `/preview` endpoint returns 10
+  representative rows + provenance.
+- Platform fee: every settled tx now includes `platform_fee_sats`
+  (default 2% / 200 bps, configurable via `ANDROMEDA_PLATFORM_FEE_BPS`).
+  Provider, market-monitor, and dataset-seller all report fees on tx
+  records.
+- New registry endpoint `GET /api/v1/platform/revenue` (admin-secret
+  protected). Returns total_fee_sats and tx_count.
+- 3 new MCP tools: `andromeda_browse_datasets`,
+  `andromeda_purchase_dataset` (saves to `~/.andromeda/datasets/`),
+  `andromeda_list_datasets`.
+- ADR 0008 — dataset distribution + platform fee.
+- Phase 6 test gate (`scripts/test-phase6.js`) — PASS · 10/10.
+
 ### Phase 5 — Honor & peer review (2026-04-26)
 
 - ADR 0010 — peer-review design (blind reviewer assignment, two-sided

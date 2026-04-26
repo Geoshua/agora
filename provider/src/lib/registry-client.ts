@@ -97,6 +97,8 @@ export function startHeartbeat() {
   }, 60_000);
 }
 
+const PLATFORM_FEE_BPS = parseInt(process.env.ANDROMEDA_PLATFORM_FEE_BPS ?? "200", 10);
+
 /** Fire-and-forget: record a transaction. Never throws. */
 export function recordTxFireAndForget(args: {
   buyer_pubkey: string | null;
@@ -112,13 +114,15 @@ export function recordTxFireAndForget(args: {
   const buyer_pubkey = args.buyer_pubkey ?? "unknown";
   const txId = `tx_${args.payment_hash.slice(0, 24)}`;
   const service_id = `${id.pubkey.slice(0, 8)}:${args.service_local_id}`;
+  // Phase 6: compute platform fee (default 2%).
+  const platform_fee_sats = args.platform_fee_sats ?? Math.round(args.amount_sats * PLATFORM_FEE_BPS / 10000);
   const body = {
     id: txId,
     buyer_pubkey,
     seller_pubkey: id.pubkey,
     service_id,
     amount_sats: args.amount_sats,
-    platform_fee_sats: args.platform_fee_sats ?? 0,
+    platform_fee_sats,
     payment_hash: args.payment_hash,
     settled_at: Date.now(),
   };
