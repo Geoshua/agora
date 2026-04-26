@@ -2,6 +2,27 @@
 
 ## Unreleased — Andromeda
 
+### Phase 3 — Local control plane + kill-switch (2026-04-26)
+
+- MCP server gains a localhost-only HTTP control plane (random port,
+  bound to 127.0.0.1). Bearer-token auth — token persisted to
+  `~/.andromeda/control-token` (`0600` best-effort), port to
+  `~/.andromeda/control-port`. Endpoints:
+    GET  /healthz                — public probe
+    GET  /session                — budget + kill-switch + subs snapshot
+    POST /session/budget         — reset cap
+    POST /session/kill-switch    — flip
+    GET  /events                 — server-sent events (budget, kill_switch)
+- Kill-switch flag persists in `.mcp-session.json`. Every paid MCP tool
+  hits `reserve(amount)` which now returns `"kill_switch_active"` when
+  set, refusing the call before any wallet activity.
+- New workspace `dashboard/` with a CLI placeholder
+  (`dashboard:cli`) that prints session state. Tauri 2.x GUI is
+  deliberately deferred — see ADR 0006 — so we don't add a Rust
+  toolchain dependency. `dashboard:tauri:build` is a stub that exits 0.
+- ADR 0006 — control plane in MCP, Tauri GUI deferred.
+- Phase 3 test gate (`scripts/test-phase3.js`) — PASS · 12/12.
+
 ### Phase 2 — Subscriptions & monitoring seller (2026-04-26)
 
 - Provider gains subscription primitives (additive, no break to

@@ -28,6 +28,7 @@ import { getStatus as budgetStatus, setBudget } from "./budget.js";
 import * as registry from "./registry-client.js";
 import * as subs from "./subscriptions.js";
 import { ensureBuyerIdentity, tryBuyerIdentity } from "./identity.js";
+import { startControlPlane, stopControlPlane } from "./control-plane.js";
 
 // ─── helpers ──────────────────────────────────────────────────────────
 const ok = (data) => ({
@@ -437,13 +438,20 @@ async function main() {
     process.stderr.write(`[andromeda-mcp] identity init failed: ${e.message}\n`);
   });
 
+  // Start the localhost control plane unless explicitly disabled.
+  // Tests / CI can pass ANDROMEDA_CONTROL_PLANE=off to skip.
+  if (process.env.ANDROMEDA_CONTROL_PLANE !== "off") {
+    try { await startControlPlane(); }
+    catch (e) { process.stderr.write(`[andromeda-mcp] control-plane failed: ${e.message}\n`); }
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write(`[andromeda-mcp] ready · provider=${PROVIDER} mode=${MOCK ? "mock" : "real"} budget=${budgetStatus().budget_sats} sat\n`);
 }
 
-process.on("SIGINT",  () => { close(); process.exit(0); });
-process.on("SIGTERM", () => { close(); process.exit(0); });
+process.on("SIGINT",  () => { stopControlPlane(); close(); process.exit(0); });
+process.on("SIGTERM", () => { stopControlPlane(); close(); process.exit(0); });
 
 main().catch((err) => {
   process.stderr.write(`[andromeda-mcp] fatal: ${err.message}\n`);

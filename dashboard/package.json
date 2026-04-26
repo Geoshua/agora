@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Andromeda local dashboard (Tauri-shell-ready). Phase 3 scaffolds the headless control plane; full Tauri build is deferred.",
+  "description": "Andromeda local dashboard. Phase 3 ships the headless control plane (in MCP) + this CLI; the Tauri GUI shell is deferred per ADR 0006.",
   "scripts": {
     "dev": "node src/control-plane-cli.js",
-    "build": "echo 'tauri build deferred — control-plane runs in MCP server'"
+    "cli": "node src/control-plane-cli.js",
+    "build": "node src/tauri-build-stub.js",
+    "tauri:build": "node src/tauri-build-stub.js"
   }
 }

@@ -32,9 +32,14 @@ function load() {
   try {
     const raw = fs.readFileSync(STATE_PATH, "utf8");
     const j = JSON.parse(raw);
-    return { budget: MAX, spent: j.spent ?? 0, started_at: j.started_at ?? Date.now() };
+    return {
+      budget: MAX,
+      spent: j.spent ?? 0,
+      started_at: j.started_at ?? Date.now(),
+      kill_switch_active: !!j.kill_switch_active,
+    };
   } catch {
-    return { budget: MAX, spent: 0, started_at: Date.now() };
+    return { budget: MAX, spent: 0, started_at: Date.now(), kill_switch_active: false };
   }
 }
 
@@ -52,15 +57,27 @@ export function getStatus() {
     spent_sats:     state.spent,
     remaining_sats: Math.max(0, state.budget - state.spent),
     started_at:     new Date(state.started_at).toISOString(),
+    kill_switch_active: !!state.kill_switch_active,
   };
+}
+
+export function getKillSwitch() { return !!state.kill_switch_active; }
+export function setKillSwitch(active) {
+  state.kill_switch_active = !!active;
+  save();
+  return state.kill_switch_active;
 }
 
 /**
  * Check whether `amount` sats can be spent. Returns null if OK; on success
  * the caller must call confirm(amount) once the spend actually happens.
- * Returns a string reason if the spend would breach the cap.
+ * Returns a string reason if the spend would breach the cap or the
+ * kill-switch is active.
  */
 export function reserve(amount) {
+  if (state.kill_switch_active) {
+    return "kill_switch_active";
+  }
   if (amount <= 0) return null;
   if (state.spent + amount > state.budget) {
     return `budget exceeded: would spend ${state.spent + amount} sat against cap ${state.budget} sat (already spent ${state.spent})`;
@@ -75,12 +92,14 @@ export function confirm(amount) {
   save();
 }
 
-/** Reset the budget to a new value. Used by the lumen_set_budget tool. */
+/** Reset the budget to a new value. Used by the andromeda_set_budget tool. */
 export function setBudget(amount) {
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("budget must be a positive integer (sats)");
   state.budget = amount;
   state.spent = 0;
   state.started_at = Date.now();
+  // Resetting the budget does NOT auto-disable the kill-switch — that
+  // requires an explicit action via the control plane.
   save();
   return getStatus();
 }
