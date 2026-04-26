@@ -1,0 +1,10 @@
+{
+  "name": "@andromeda/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Andromeda public web index (Phase 7, optional).",
+  "scripts": {
+    "build": "echo 'web build deferred'"
+  }
+}

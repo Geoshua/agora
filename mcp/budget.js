@@ -18,7 +18,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const STATE_PATH = process.env.LUMEN_MCP_STATE_PATH ?? path.resolve(process.cwd(), "..", ".mcp-session.json");
+// ADR 0002: existing .mcp-session.json stays put (don't invalidate sessions).
+// Read new env var first, fall back to legacy LUMEN_MCP_STATE_PATH.
+const STATE_PATH =
+  process.env.ANDROMEDA_MCP_STATE_PATH ??
+  process.env.LUMEN_MCP_STATE_PATH ??
+  path.resolve(process.cwd(), "..", ".mcp-session.json");
 const MAX = parseInt(process.env.MAX_BUDGET_SATS ?? "5000", 10);
 
 let state = load();

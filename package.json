@@ -1,11 +1,22 @@
 {
   "name": "lumen",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "LUMEN — agents pay agents over Lightning. SPIRAL × Hack-Nation Challenge 02.",
+  "description": "Andromeda (formerly LUMEN) — agents pay agents over Lightning. SPIRAL × Hack-Nation Challenge 02.",
+  "workspaces": [
+    "packages/andromeda-core",
+    "provider",
+    "buyer",
+    "mcp",
+    "registry",
+    "dashboard",
+    "agents/market-monitor",
+    "agents/dataset-seller",
+    "web"
+  ],
   "scripts": {
-    "install:all": "npm install --prefix provider && npm install --prefix buyer",
+    "install:all": "npm install && npm install --prefix provider && npm install --prefix buyer && npm install --prefix mcp",
     "provider": "npm run dev --prefix provider",
     "buyer": "npm start --prefix buyer",
     "buyer:multi": "npm run demo:multi --prefix buyer",
@@ -14,6 +25,17 @@
     "preflight": "node scripts/preflight.js",
     "test:phase1": "node scripts/test-phase1.js",
     "test:mcp":    "node scripts/test-mcp.js",
-    "mcp":         "node mcp/server.js"
+    "test:phase0": "node scripts/test-phase0.js",
+    "test:phase1b": "node scripts/test-phase1b.js",
+    "test:phase2": "node scripts/test-phase2.js",
+    "test:phase3": "node scripts/test-phase3.js",
+    "test:phase4": "node scripts/test-phase4.js",
+    "test:phase5": "node scripts/test-phase5.js",
+    "test:phase6": "node scripts/test-phase6.js",
+    "registry":   "npm run dev --prefix registry",
+    "dashboard":  "npm run dev --prefix dashboard",
+    "monitor":    "npm run start --prefix agents/market-monitor",
+    "datasets":   "npm run start --prefix agents/dataset-seller",
+    "mcp":        "node mcp/server.js"
   }
 }

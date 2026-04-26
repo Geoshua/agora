@@ -1,0 +1,14 @@
+{
+  "name": "@andromeda/market-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Andromeda market-monitor seller — sells github-advisory-monitor as a sat-per-event subscription.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "@andromeda/core": "*"
+  }
+}

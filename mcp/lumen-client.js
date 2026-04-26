@@ -15,7 +15,13 @@ import "dotenv/config";
 import { LNClient } from "@getalby/sdk";
 import { reserve, confirm } from "./budget.js";
 
-export const PROVIDER = process.env.LUMEN_PROVIDER_URL ?? process.env.PROVIDER_URL ?? "http://localhost:3000";
+// New env name first, legacy fallback per ADR 0002.
+export const PROVIDER =
+  process.env.ANDROMEDA_PROVIDER_URL ??
+  process.env.LUMEN_PROVIDER_URL ??
+  process.env.PROVIDER_URL ??
+  "http://localhost:3000";
+export const REGISTRY = process.env.ANDROMEDA_REGISTRY_URL ?? "http://localhost:3030";
 export const MOCK = process.env.MOCK_MODE === "true";
 export const MAX_PRICE_SATS = parseInt(process.env.MAX_PRICE_SATS ?? "4000", 10);
 

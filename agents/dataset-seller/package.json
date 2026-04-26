@@ -1,0 +1,14 @@
+{
+  "name": "@andromeda/dataset-seller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Andromeda dataset-seller — sells data products with signed-URL delivery.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "@andromeda/core": "*"
+  }
+}
