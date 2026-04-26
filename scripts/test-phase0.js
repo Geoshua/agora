@@ -95,19 +95,59 @@ await step("@agora/core smoke tests pass (signed-request, l402, rubric, header f
   if (!r.stdout.includes("PASS · ")) throw new Error("smoke tests didn't print PASS");
 });
 
-await step("L402 macaroon format is byte-compat with provider's frozen format", async () => {
+await step("L402 macaroon byte-format is MDK-shape (ADR 0014)", async () => {
+  // Per ADR 0014, the macaroon wire format is now MDK-shape:
+  //   base64(JSON({paymentHash, amountSats, expiresAt, resource,
+  //               amount, currency, sig}))
+  // where sig = HMAC-SHA256(deriveL402Key(secret),
+  //   paymentHash\0amountSats\0expiresAt\0resource\0amount\0currency).hex
+  // and deriveL402Key(secret) = HMAC-SHA256(secret, "mdk402-token-v1").
   const mod = await import(pathToFileURL(path.join(CORE, "dist/index.js")).href);
   const secret = "X".repeat(32);
-  const body = { payment_hash: "ab", resource: "/r", amount: 1, exp: 99999999999 };
+  const body = { payment_hash: "ab", resource: "POST:/r", amount: 1, exp: 99999999999 };
   const m = mod.mintMacaroon(body, secret);
-  const [payload, sig] = m.split(".");
-  const expected = createHmac("sha256", secret).update(payload).digest("base64url");
-  if (sig !== expected) throw new Error("HMAC format diverged from provider's");
-  // Also verify the payload is base64url(JSON(body)) — same as provider.
-  const decoded = JSON.parse(Buffer.from(payload, "base64url").toString());
-  if (decoded.payment_hash !== body.payment_hash || decoded.amount !== body.amount) {
-    throw new Error("payload encoding differs");
+
+  // 1. Bytes parse as base64-of-JSON, NOT the legacy `payload.sig` form.
+  if (m.includes(".")) throw new Error(`MDK-shape macaroon must not contain '.' separator; got ${m}`);
+  let parsed;
+  try { parsed = JSON.parse(Buffer.from(m, "base64").toString("utf8")); }
+  catch (e) { throw new Error(`macaroon is not base64-of-JSON: ${e.message}`); }
+
+  // 2. Required fields are present in MDK camelCase.
+  for (const k of ["paymentHash", "amountSats", "expiresAt", "resource", "amount", "currency", "sig"]) {
+    if (!(k in parsed)) throw new Error(`missing required MDK field: ${k}`);
   }
+  if (parsed.paymentHash !== body.payment_hash) throw new Error("paymentHash mismatch");
+  if (parsed.amountSats !== body.amount) throw new Error("amountSats mismatch");
+  if (parsed.expiresAt !== body.exp) throw new Error("expiresAt mismatch");
+  if (parsed.resource !== body.resource) throw new Error("resource mismatch");
+
+  // 3. Signature is HMAC-SHA256(deriveL402Key(secret), msg) hex.
+  const key = createHmac("sha256", secret).update("mdk402-token-v1").digest();
+  const message = [parsed.paymentHash, String(parsed.amountSats), String(parsed.expiresAt),
+                   parsed.resource, String(parsed.amount), parsed.currency].join("\0");
+  const expected = createHmac("sha256", key).update(message).digest("hex");
+  if (parsed.sig !== expected) throw new Error("HMAC sig diverged from MDK format");
+});
+
+await step("L402 soft-transition: verifyAuth still parses legacy-format macaroons", async () => {
+  // ADR 0014 §"Soft-transition verifier": one major-version cycle the
+  // legacy `base64url(json).hmac` format is still accepted to keep
+  // already-issued credentials working. Synthesize one and verify.
+  const mod = await import(pathToFileURL(path.join(CORE, "dist/index.js")).href);
+  const { createHash } = await import("node:crypto");
+  const secret = "X".repeat(32);
+  // 32-byte preimage of zeros; SHA256 hash known.
+  const preimage = "00".repeat(32);
+  const paymentHash = createHash("sha256").update(Buffer.from(preimage, "hex")).digest("hex");
+  const resource = "POST:/v1/test-legacy";
+  const legacy = mod.mintMacaroonLegacy(
+    { payment_hash: paymentHash, resource, amount: 42, exp: Math.floor(Date.now() / 1000) + 60 },
+    secret,
+  );
+  const r = mod.verifyAuth(`L402 ${legacy}:${preimage}`, resource, secret);
+  if (!r.ok) throw new Error(`legacy verifier rejected: ${r.reason}`);
+  if (r.family !== "legacy") throw new Error(`expected family=legacy, got ${r.family}`);
 });
 
 await step("MCP env var fallback chain works (AGORA_PROVIDER_URL → ANDROMEDA_PROVIDER_URL → LUMEN_PROVIDER_URL)", () => {

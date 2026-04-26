@@ -6,6 +6,8 @@ import {
   generateKeypair, pubkeyFor, signUtf8, verifyUtf8,
   signRequest, verifyRequest,
   mintMacaroon, verifyMacaroon, verifyPreimage, parseAuthHeader,
+  mintMacaroonLegacy, verifyMacaroonLegacy, verifyAuth, canonicalResource,
+  challengeHeader,
   validateReviewSubmission, rollupScore,
   DEFAULTS,
   HDR_PUBKEY, HDR_TIMESTAMP, HDR_SIG,
@@ -211,25 +213,105 @@ await it("readEnv prefers AGORA_*, falls back to ANDROMEDA_* then LUMEN_*", () =
   assert.strictEqual(readEnvOr("X", "fallback", { source: {} }), "fallback");
 });
 
-await it("L402 macaroon mint/verify roundtrip", () => {
+await it("L402 macaroon mint/verify roundtrip (MDK shape)", () => {
   const secret = "X".repeat(32);
-  const body = { payment_hash: "deadbeef", resource: "/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 };
+  const body = { payment_hash: "deadbeef", resource: "POST:/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 };
   const m = mintMacaroon(body, secret);
   const v = verifyMacaroon(m, secret);
   assert.deepStrictEqual(v, body);
 });
 
 await it("L402 macaroon rejects bad secret", () => {
-  const body = { payment_hash: "deadbeef", resource: "/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 };
+  const body = { payment_hash: "deadbeef", resource: "POST:/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 };
   const m = mintMacaroon(body, "X".repeat(32));
   assert.strictEqual(verifyMacaroon(m, "Y".repeat(32)), null);
 });
 
-await it("L402 macaroon rejects expired", () => {
+await it("L402 MDK-shape verifier does NOT enforce expiry (paid credentials are permanent — MDK design)", () => {
+  // Pre-ADR-0014, Agora's hand-rolled verifier rejected expired
+  // macaroons. MDK chose to make paid credentials permanent — once a
+  // preimage matches, the credential is forever valid. Single-use is
+  // enforced separately by the seller's invoices table.
   const secret = "X".repeat(32);
-  const body = { payment_hash: "deadbeef", resource: "/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) - 60 };
+  const body = { payment_hash: "deadbeef", resource: "POST:/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) - 60 };
   const m = mintMacaroon(body, secret);
-  assert.strictEqual(verifyMacaroon(m, secret), null);
+  const v = verifyMacaroon(m, secret);
+  assert.deepStrictEqual(v, body);
+});
+
+await it("L402 MDK-shape: tampered amount fails HMAC", () => {
+  const secret = "X".repeat(32);
+  const body = { payment_hash: "deadbeef", resource: "POST:/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 };
+  const m = mintMacaroon(body, secret);
+  // Decode, tamper with amountSats, re-encode without re-signing.
+  const obj = JSON.parse(Buffer.from(m, "base64").toString());
+  obj.amountSats = 1;
+  const tampered = Buffer.from(JSON.stringify(obj)).toString("base64");
+  assert.strictEqual(verifyMacaroon(tampered, secret), null);
+});
+
+await it("L402 soft-transition: legacy-format macaroon still verifies via verifyMacaroonLegacy", () => {
+  const secret = "X".repeat(32);
+  const body = { payment_hash: "deadbeef", resource: "POST:/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 };
+  const legacy = mintMacaroonLegacy(body, secret);
+  // Legacy verifier accepts old-format mints (with the body fields the
+  // legacy mint serialized).
+  const v = verifyMacaroonLegacy(legacy, secret);
+  assert.deepStrictEqual(v, body);
+  // MDK-shape verifier rejects legacy bytes (no `.` separator path,
+  // not valid base64-of-JSON).
+  assert.strictEqual(verifyMacaroon(legacy, secret), null);
+});
+
+await it("L402 verifyAuth: MDK-shape happy path", () => {
+  const secret = "X".repeat(32);
+  // 32 zero bytes; SHA256 hash known.
+  const preimage = "00".repeat(32);
+  const paymentHash = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
+  const resource = canonicalResource("POST", "/v1/test");
+  const m = mintMacaroon({ payment_hash: paymentHash, resource, amount: 100, exp: Math.floor(Date.now() / 1000) + 60 }, secret);
+  const r = verifyAuth(`L402 ${m}:${preimage}`, resource, secret);
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  if (r.ok) {
+    assert.strictEqual(r.family, "mdk");
+    assert.strictEqual(r.body.payment_hash, paymentHash);
+  }
+});
+
+await it("L402 verifyAuth: legacy-shape falls through to legacy verifier", () => {
+  const secret = "X".repeat(32);
+  const preimage = "00".repeat(32);
+  const paymentHash = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
+  const resource = canonicalResource("POST", "/v1/test");
+  const m = mintMacaroonLegacy({ payment_hash: paymentHash, resource, amount: 100, exp: Math.floor(Date.now() / 1000) + 60 }, secret);
+  const r = verifyAuth(`L402 ${m}:${preimage}`, resource, secret);
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  if (r.ok) assert.strictEqual(r.family, "legacy");
+});
+
+await it("L402 verifyAuth: rejects resource mismatch", () => {
+  const secret = "X".repeat(32);
+  const preimage = "00".repeat(32);
+  const paymentHash = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
+  const m = mintMacaroon({ payment_hash: paymentHash, resource: "POST:/v1/A", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 }, secret);
+  const r = verifyAuth(`L402 ${m}:${preimage}`, "POST:/v1/B", secret);
+  assert.strictEqual(r.ok, false);
+});
+
+await it("L402 verifyAuth: rejects bad preimage", () => {
+  const secret = "X".repeat(32);
+  const paymentHash = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
+  const m = mintMacaroon({ payment_hash: paymentHash, resource: "POST:/v1/test", amount: 100, exp: Math.floor(Date.now() / 1000) + 60 }, secret);
+  const r = verifyAuth(`L402 ${m}:${"ff".repeat(32)}`, "POST:/v1/test", secret);
+  assert.strictEqual(r.ok, false);
+});
+
+await it("L402 challengeHeader format matches bLIP-26", () => {
+  assert.strictEqual(challengeHeader("MAC", "INV"), 'L402 macaroon="MAC", invoice="INV"');
+});
+
+await it("L402 parseAuthHeader accepts LSAT scheme (bLIP-26 backwards compat)", () => {
+  assert.deepStrictEqual(parseAuthHeader("LSAT abc:def"), { macaroon: "abc", preimage: "def" });
 });
 
 await it("L402 verifyPreimage works", () => {
