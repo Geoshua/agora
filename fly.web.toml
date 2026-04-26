@@ -4,7 +4,7 @@ app = "agora-web"
 primary_region = "fra"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "Dockerfile.web"
 
 [env]
   PORT = "3300"

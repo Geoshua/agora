@@ -20,40 +20,52 @@ What stays local: `mcp/`, `dashboard/`, `buyer/`, sellers (`provider/`,
 - A funded Fly.io account ($0–5/mo at hackathon traffic levels)
 - This repo cloned locally
 
+## File layout
+
+The Dockerfiles and Fly configs live at the **repo root**, not inside
+`registry/` or `web/`. They need the whole monorepo as the Docker build
+context (the npm workspaces depend on each other), and Fly always uses the
+fly.toml's directory as the build context.
+
+```
+Dockerfile.registry   # multi-stage build for registry/
+Dockerfile.web        # multi-stage build for web/
+fly.registry.toml     # registry app config
+fly.web.toml          # web app config
+.dockerignore         # shared — keeps node_modules, .next, *.db, .env* out
+```
+
+All deploy commands run from the repo root and pass `-c fly.<app>.toml`.
+
 ## One-time setup
 
 ### 1. Create the registry app and its persistent volume
 
 ```bash
-cd registry
-
-# Create the app (skips if it already exists). --no-deploy because we still
-# need to set secrets and create the volume before the first boot.
+# from the repo root
 fly apps create agora-registry --org personal
 
-# Create a 1GB volume in the primary region for the SQLite DB.
-# Single volume, single region — the registry MUST stay single-instance.
-fly volumes create agora_registry_data --region fra --size 1 --yes
+# 1 GB volume in the primary region for SQLite. Single volume, single region.
+fly volumes create agora_registry_data --region fra --size 1 --yes -a agora-registry
 
-# Generate and set the admin secret. Required — the admin endpoints fail
-# secure (return 503) if this is unset.
-fly secrets set ADMIN_SECRET="$(openssl rand -hex 32)"
+# Required — admin endpoints fail secure (503) if ADMIN_SECRET is unset.
+fly secrets set ADMIN_SECRET="$(openssl rand -hex 32)" -a agora-registry --stage
 
-# Optional: signing secret for cross-service signed requests (review escrow,
-# slashing). Defaults to a placeholder if unset; set explicitly in prod.
-fly secrets set AGORA_REGISTRY_SECRET="$(openssl rand -hex 32)"
+# Signing secret for cross-service signed requests (review escrow, slashing).
+fly secrets set AGORA_REGISTRY_SECRET="$(openssl rand -hex 32)" -a agora-registry --stage
 ```
 
 ### 2. Deploy the registry
 
 ```bash
-# --ha=false enforces a single Fly machine. SQLite + multi-machine = corruption.
-fly deploy --ha=false
+# --ha=false enforces a single machine. SQLite + multi-machine = corruption.
+# --remote-only builds in Fly's depot (no local Docker needed).
+fly deploy -c fly.registry.toml --ha=false --remote-only -a agora-registry
 ```
 
 First deploy takes ~3–5 min (Docker build + image push + machine boot).
-The migrations apply automatically on first boot — watch `fly logs` if you
-want to see them.
+Migrations apply automatically on first boot — watch `fly logs -a agora-registry`
+if you want to see them.
 
 Verify:
 
@@ -65,14 +77,13 @@ curl https://agora-registry.fly.dev/api/v1/health
 ### 3. Create the web app
 
 ```bash
-cd ../web
-
+# still from the repo root
 fly apps create agora-web --org personal
 
 # Point web at the deployed registry.
-fly secrets set AGORA_REGISTRY_URL="https://agora-registry.fly.dev"
+fly secrets set AGORA_REGISTRY_URL="https://agora-registry.fly.dev" -a agora-web --stage
 
-fly deploy
+fly deploy -c fly.web.toml --remote-only -a agora-web
 ```
 
 Web is stateless — safe to scale horizontally if you ever need to. First

@@ -7,7 +7,7 @@ app = "agora-registry"
 primary_region = "fra"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "Dockerfile.registry"
 
 [env]
   PORT = "3030"
