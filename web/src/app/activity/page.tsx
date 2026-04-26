@@ -26,7 +26,7 @@ export default async function ActivityPage() {
           Every settled transaction
         </h1>
         <p className="mt-3 max-w-2xl text-zinc-400">
-          The most recent {txs.length} payments routed through the Andromeda registry.
+          The most recent {txs.length} payments routed through the Agora registry.
           One line per buyer→seller settle. Refresh to update.
         </p>
       </div>
