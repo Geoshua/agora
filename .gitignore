@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+mcp/.env.requester
+.mcp-session-requester.json
 
 # runtime state
 lumen.db
