@@ -19,7 +19,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHmac, createHash, randomBytes } from "node:crypto";
-import { generateKeypair, pubkeyFor, signRequest, mintMacaroon, verifyMacaroon, verifyPreimage, parseAuthHeader } from "@agora/core";
+import {
+  generateKeypair, pubkeyFor, signRequest,
+  // ADR 0014: MDK-shape mint + soft-transition verifier.
+  mintMacaroon, verifyAuth, canonicalResource, challengeHeader,
+} from "@agora/core";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -226,17 +230,20 @@ const server = http.createServer(async (req, res) => {
     if (m === "POST" && (m2 = p.match(/^\/api\/v1\/dataset\/([^\/]+)\/purchase$/))) {
       const ds = loadDataset();
       if (m2[1] !== ds.dataset_id) return send(res, 404, { error: "no such dataset" });
-      const RESOURCE = `/v1/dataset/${ds.dataset_id}/purchase`;
+      const RESOURCE_PATH = `/v1/dataset/${ds.dataset_id}/purchase`;
+      // ADR 0014: MDK macaroons bind METHOD+PATH as `<METHOD>:<path>`.
+      const CANON = canonicalResource("POST", RESOURCE_PATH);
 
       const auth = req.headers.authorization ?? null;
       if (!auth) {
-        // Issue 402 challenge.
+        // Issue 402 challenge — MDK-shape macaroon.
         const inv = makeInvoice(PRICE_SATS, 300);
         const macaroon = mintMacaroon({
           payment_hash: inv.payment_hash,
-          resource: RESOURCE,
+          resource: CANON,
           amount: PRICE_SATS,
           exp: inv.expires_at,
+          currency: "SAT",
         }, L402_SECRET);
         const body = {
           error: "payment_required",
@@ -248,20 +255,22 @@ const server = http.createServer(async (req, res) => {
           macaroon,
         };
         return send(res, 402, body, {
-          "www-authenticate": `L402 macaroon="${macaroon}", invoice="${inv.invoice}"`,
+          "www-authenticate": challengeHeader(macaroon, inv.invoice),
         });
       }
 
-      const parsed = parseAuthHeader(auth);
-      if (!parsed) return send(res, 401, { error: "malformed L402 header" });
-      const macBody = verifyMacaroon(parsed.macaroon, L402_SECRET);
-      if (!macBody) return send(res, 401, { error: "invalid macaroon" });
-      if (macBody.resource !== RESOURCE) return send(res, 401, { error: "resource mismatch" });
-      if (!verifyPreimage(parsed.preimage, macBody.payment_hash)) {
-        return send(res, 401, { error: "preimage mismatch" });
+      // Soft-transition verifier — accepts MDK-shape and legacy.
+      const r = verifyAuth(auth, CANON, L402_SECRET);
+      if (!r.ok) return send(res, 401, { error: r.reason });
+
+      // Idempotent — single-use enforced by dropping from invoice store.
+      // (The Map.delete is racy; for this single-process seller it's
+      // fine — same behaviour as before. Provider has DB-backed
+      // single-use; this seller is intentionally simpler.)
+      if (!invoices.has(r.body.payment_hash)) {
+        return send(res, 409, { error: "macaroon already consumed" });
       }
-      // Idempotent — drop from invoice store.
-      invoices.delete(macBody.payment_hash);
+      invoices.delete(r.body.payment_hash);
 
       // Issue signed download URL.
       // ADR 0013: read canonical x-agora-pubkey, fall back to x-andromeda-pubkey then x-lumen-pubkey.
@@ -276,8 +285,8 @@ const server = http.createServer(async (req, res) => {
       void recordTx({
         buyer_pubkey: buyerPubkey,
         service_local_id: ds.dataset_id,
-        amount_sats: macBody.amount,
-        payment_hash: macBody.payment_hash,
+        amount_sats: r.body.amount,
+        payment_hash: r.body.payment_hash,
       });
 
       return send(res, 200, {
@@ -285,8 +294,10 @@ const server = http.createServer(async (req, res) => {
         dataset_id: ds.dataset_id,
         signed_url: downloadUrl,
         valid_for_seconds: 24 * 3600,
-        amount_sats_paid: macBody.amount,
-        platform_fee_sats: Math.round(macBody.amount * PLATFORM_FEE_BPS / 10000),
+        amount_sats_paid: r.body.amount,
+        platform_fee_sats: Math.round(r.body.amount * PLATFORM_FEE_BPS / 10000),
+        // ADR 0014: surface which macaroon family verified.
+        l402_family: r.family,
       });
     }
 
