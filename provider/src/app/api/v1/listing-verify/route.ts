@@ -2,6 +2,7 @@ import { require402, verifyAuth, authError } from "@/lib/l402";
 import { errorResponse } from "@/lib/errors";
 import { rateLimit } from "@/lib/ratelimit";
 import { trace, finalize } from "@/lib/log";
+import { recordTxFireAndForget } from "@/lib/registry-client";
 
 const RESOURCE = "/v1/listing-verify";
 
@@ -30,6 +31,15 @@ export async function POST(req: Request) {
     return finalize(ctx, errorResponse("bad_request", "listing and date are required", undefined, ctx.request_id), 0);
 
   const proof = await verifyListing(body.listing, body.date, body.max_age_h ?? 24);
+
+  // Fire-and-forget: record this settled tx in the Andromeda registry.
+  // Buyer pubkey may be unknown (legacy buyers don't sign); pass null.
+  recordTxFireAndForget({
+    buyer_pubkey: req.headers.get("x-andromeda-pubkey"),
+    service_local_id: "listing-verify",
+    amount_sats: result.body.amount,
+    payment_hash: result.body.payment_hash,
+  });
 
   const res = Response.json(proof, {
     headers: {

@@ -29,6 +29,10 @@ dist/
 provider/.next/
 provider/out/
 provider/build/
+registry/.next/
+registry/out/
+registry/build/
+**/.next/
 
 # os
 .DS_Store

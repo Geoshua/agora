@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(cat C:/Projects/lumen/provider/next.config.*)",
+      "Bash(taskkill //PID 14272 //F)"
+    ]
+  }
+}

@@ -7,6 +7,7 @@ import pino from "pino";
 import { recordRequest } from "./db";
 import { ipOf } from "./ratelimit";
 import { newRequestId } from "./errors";
+import { ensureBooted } from "./boot";
 
 export const logger = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -24,6 +25,10 @@ export type RequestContext = {
 };
 
 export function trace(req: Request, endpoint: string): RequestContext {
+  // Lazy boot on first request — generates identity & registers with
+  // registry. Fire-and-forget; never blocks the request.
+  void ensureBooted();
+
   const request_id = req.headers.get("x-request-id") ?? newRequestId();
   const ip = ipOf(req);
   const ua = req.headers.get("user-agent") ?? "";

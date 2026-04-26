@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@andromeda/core": "*",
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@getalby/lightning-tools": "^8.1.0",
     "@getalby/sdk": "^7.0.0",

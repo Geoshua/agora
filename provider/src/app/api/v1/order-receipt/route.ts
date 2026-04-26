@@ -7,6 +7,7 @@ import { errorResponse } from "@/lib/errors";
 import { rateLimit } from "@/lib/ratelimit";
 import { trace, finalize } from "@/lib/log";
 import { recordReceipt } from "@/lib/db";
+import { recordTxFireAndForget } from "@/lib/registry-client";
 import { createHash, createHmac } from "node:crypto";
 
 const RESOURCE = "/v1/order-receipt";
@@ -56,6 +57,13 @@ export async function POST(req: Request) {
 
   recordReceipt({
     receipt_id, claims_json, signature, order_id: body.order_id, buyer: body.buyer ?? null,
+  });
+
+  recordTxFireAndForget({
+    buyer_pubkey: req.headers.get("x-andromeda-pubkey"),
+    service_local_id: "order-receipt",
+    amount_sats: result.body.amount,
+    payment_hash: result.body.payment_hash,
   });
 
   const res = Response.json({ ...claims, signature }, {

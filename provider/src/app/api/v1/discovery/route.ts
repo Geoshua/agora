@@ -7,6 +7,8 @@
 //
 // No paywall on this endpoint — discovery is free; the work is paid.
 
+import { ensureBooted } from "@/lib/boot";
+
 export const dynamic = "force-dynamic";
 
 const SELF = (req: Request) => {
@@ -15,6 +17,7 @@ const SELF = (req: Request) => {
 };
 
 export async function GET(req: Request) {
+  void ensureBooted();
   const base = SELF(req);
   const wallet_mode = process.env.MOCK_MODE === "true" ? "mock" : "real";
 
