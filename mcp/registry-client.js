@@ -49,3 +49,28 @@ export async function recommend(body) {
   }
   return r.json();
 }
+
+// ─── signed POST helper for buyer-side reviews ──────────────────────
+import { signRequest } from "@andromeda/core";
+
+export async function signedPost(path, body, identity) {
+  const raw = JSON.stringify(body);
+  const headers = await signRequest({
+    method: "POST", path, body: raw,
+    privkeyHex: identity.privkey, pubkeyHex: identity.pubkey,
+  });
+  const r = await fetch(`${REGISTRY}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: raw,
+  });
+  let j = null;
+  try { j = await r.json(); } catch {}
+  return { ok: r.ok, status: r.status, json: j };
+}
+
+export async function getReviewerAssignments(pubkey) {
+  const r = await fetch(`${REGISTRY}/api/v1/reviews/assigned?reviewer_pubkey=${encodeURIComponent(pubkey)}`);
+  if (!r.ok) throw new Error(`assigned ${r.status}`);
+  return r.json();
+}

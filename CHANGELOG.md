@@ -2,6 +2,43 @@
 
 ## Unreleased — Andromeda
 
+### Phase 5 — Honor & peer review (2026-04-26)
+
+- ADR 0010 — peer-review design (blind reviewer assignment, two-sided
+  slashing, objective+subjective rubric, base honor + bonus, 90-day
+  decay, no agent-companies in v1).
+- Registry endpoints (all signed):
+    POST /api/v1/sellers/:pubkey/rate          (buyer-signed, requires
+                                                tx within 30 days)
+    POST /api/v1/reviewers/availability        (reviewer-signed)
+    POST /api/v1/reviews/request               (seller-signed; blind
+                                                weighted-random reviewer
+                                                assignment; 72h deadline)
+    GET  /api/v1/reviews/assigned?reviewer_pubkey=
+    POST /api/v1/reviews/:id/submit            (reviewer-signed; rubric
+                                                validation; +rollup×2
+                                                seller honor; 95% escrow
+                                                payout, 5% platform cut)
+    POST /api/v1/reviews/:id/dispute           (buyer-signed; slashes
+                                                reviewer -50, returns
+                                                escrow, signed audit log)
+- Honor decay: 90-day cutoff × 0.9, runs lazily on every
+  `GET /api/v1/sellers/:pubkey` (capped to once per UTC day) and on
+  demand via `POST /api/v1/admin/decay?force=1`. Sellers' badges
+  (`peer_reviewed`, `review_count`, `max_rollup`) appear in the seller
+  GET response.
+- Slashing audit log: `slashing_events` table; entries HMAC-signed with
+  ANDROMEDA_REGISTRY_SECRET (or L402_SECRET fallback).
+- 5 new MCP tools: `andromeda_rate_seller`, `_request_review`,
+  `_set_reviewer_availability`, `_check_review_assignments`,
+  `_submit_review`.
+- MCP buyer now attaches `X-Andromeda-Pubkey` header on paid calls so
+  the registry can attribute transactions to a buyer (enables the rate
+  path's "tx within 30 days" check).
+- Migration `registry/migrations/0002-honor-decay.sql` adds
+  `decay_runs` + helpful indexes.
+- Phase 5 test gate (`scripts/test-phase5.js`) — PASS · 16/16.
+
 ### Phase 4 — Orchestrator (recommend) (2026-04-26)
 
 - New registry endpoint `POST /api/v1/orchestrator/recommend`. Body:

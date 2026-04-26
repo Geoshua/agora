@@ -14,6 +14,7 @@
 import "dotenv/config";
 import { LNClient } from "@getalby/sdk";
 import { reserve, confirm } from "./budget.js";
+import { tryBuyerIdentity } from "./identity.js";
 
 // New env name first, legacy fallback per ADR 0002.
 export const PROVIDER =
@@ -39,9 +40,15 @@ export function close() { try { _ln?.close(); _ln = null; } catch {} }
 export async function callPaidEndpoint(path, args) {
   const t0 = Date.now();
 
+  // Optional buyer pubkey header — lets the provider record an
+  // attributable transaction in the registry. Not strictly required
+  // (anonymous buyers still work).
+  const id = tryBuyerIdentity();
+  const buyerHeader = id ? { "x-andromeda-pubkey": id.pubkey } : {};
+
   const r = await fetch(`${PROVIDER}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...buyerHeader },
     body: JSON.stringify(args),
   });
   if (r.status !== 402) {
@@ -68,6 +75,7 @@ export async function callPaidEndpoint(path, args) {
     headers: {
       "content-type": "application/json",
       "authorization": `L402 ${challenge.macaroon}:${preimage}`,
+      ...buyerHeader,
     },
     body: JSON.stringify(args),
   });

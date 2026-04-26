@@ -462,12 +462,130 @@ server.registerTool(
   },
 );
 
+// ─── Phase 5 — honor & peer review tools ─────────────────────────────
+
+server.registerTool(
+  "andromeda_rate_seller",
+  {
+    title: "Andromeda — rate a seller (1..5)",
+    description:
+      "Submit a 1-5 star rating for a seller you've recently transacted with (within 30 days). " +
+      "Buyer-signed; the registry verifies the buyer's signature against transactions in its ledger.",
+    inputSchema: {
+      seller_pubkey: z.string().min(1),
+      stars: z.number().int().min(1).max(5),
+    },
+  },
+  async ({ seller_pubkey, stars }) => {
+    try {
+      const id = await ensureBuyerIdentity();
+      const r = await registry.signedPost(`/api/v1/sellers/${encodeURIComponent(seller_pubkey)}/rate`, { stars }, id);
+      if (!r.ok) return fail(`rate failed: ${r.json?.error ?? r.status}`);
+      return ok({ seller_pubkey, stars, new_honor: r.json.new_honor });
+    } catch (e) { return fail(e.message); }
+  },
+);
+
+server.registerTool(
+  "andromeda_request_review",
+  {
+    title: "Andromeda — request peer review of a service (seller-side)",
+    description:
+      "Open a peer-review request. Pays an escrow (held by the registry); registry blindly assigns a random reviewer. " +
+      "On honest review submission, the reviewer gets escrow minus 5% platform cut. On dispute, the reviewer is slashed " +
+      "and escrow returns to the requester. " +
+      "This is a SELLER-side tool; the buyer-side identity in this MCP can also test it for development purposes.",
+    inputSchema: {
+      service_id: z.string().optional(),
+      escrow_sats: z.number().int().positive(),
+    },
+  },
+  async ({ service_id, escrow_sats }) => {
+    try {
+      const id = await ensureBuyerIdentity();
+      const r = await registry.signedPost(`/api/v1/reviews/request`, { service_id, escrow_sats }, id);
+      if (!r.ok) return fail(`request_review failed: ${r.json?.error ?? r.status}`);
+      return ok(r.json);
+    } catch (e) { return fail(e.message); }
+  },
+);
+
+server.registerTool(
+  "andromeda_set_reviewer_availability",
+  {
+    title: "Andromeda — flip reviewer availability",
+    description:
+      "Mark the buyer/reviewer (this MCP's identity) as available or unavailable for blind review assignment. " +
+      "When available, the registry may pick this pubkey for future review requests.",
+    inputSchema: { available: z.boolean() },
+  },
+  async ({ available }) => {
+    try {
+      const id = await ensureBuyerIdentity();
+      const r = await registry.signedPost(`/api/v1/reviewers/availability`, { available }, id);
+      if (!r.ok) return fail(`set_availability: ${r.json?.error ?? r.status}`);
+      return ok(r.json);
+    } catch (e) { return fail(e.message); }
+  },
+);
+
+server.registerTool(
+  "andromeda_check_review_assignments",
+  {
+    title: "Andromeda — list pending review assignments",
+    description: "Returns review requests assigned to this MCP's identity that are still pending submission.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const id = await ensureBuyerIdentity();
+      const j = await registry.getReviewerAssignments(id.pubkey);
+      return ok({ reviewer_pubkey: id.pubkey, assigned: j.assigned });
+    } catch (e) { return fail(e.message); }
+  },
+);
+
+server.registerTool(
+  "andromeda_submit_review",
+  {
+    title: "Andromeda — submit a peer review",
+    description:
+      "Submit a rubric-scored review for a request you were assigned. Scores are 0..5 across six fields. " +
+      "Objective fields (correctness, latency, uptime, spec_compliance) require justification (≥5 chars). " +
+      "Submission triggers honor update and escrow split.",
+    inputSchema: {
+      request_id: z.string().min(1),
+      scores: z.object({
+        correctness: z.number().min(0).max(5),
+        latency: z.number().min(0).max(5),
+        uptime: z.number().min(0).max(5),
+        spec_compliance: z.number().min(0).max(5),
+        value_for_price: z.number().min(0).max(5),
+        documentation: z.number().min(0).max(5),
+      }),
+      justifications: z.record(z.string(), z.string()).optional(),
+    },
+  },
+  async ({ request_id, scores, justifications }) => {
+    try {
+      const id = await ensureBuyerIdentity();
+      const r = await registry.signedPost(`/api/v1/reviews/${encodeURIComponent(request_id)}/submit`,
+        { scores, justifications: justifications ?? {} }, id);
+      if (!r.ok) return fail(`submit: ${r.json?.error ?? r.status}`);
+      return ok(r.json);
+    } catch (e) { return fail(e.message); }
+  },
+);
+
 // ─── connect ──────────────────────────────────────────────────────────
 async function main() {
-  // Fire-and-forget: generate buyer keypair if missing. Don't block startup.
-  ensureBuyerIdentity().catch((e) => {
+  // Generate buyer keypair if missing. We await this so paid tools
+  // can attach the X-Andromeda-Pubkey header (lets the registry
+  // attribute transactions to a buyer for the rate path).
+  try { await ensureBuyerIdentity(); }
+  catch (e) {
     process.stderr.write(`[andromeda-mcp] identity init failed: ${e.message}\n`);
-  });
+  }
 
   // Start the localhost control plane unless explicitly disabled.
   // Tests / CI can pass ANDROMEDA_CONTROL_PLANE=off to skip.
