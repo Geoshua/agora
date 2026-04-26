@@ -1,507 +1,227 @@
-# Andromeda — security audit
+# Agora Security Audit — post-rebrand pass
 
-> **Historical note:** This audit was written under the project's
-> previous name. The codebase is now branded **Agora** (see ADR 0013).
-> Findings below are still applicable; only the brand changed.
+> **Auditor:** independent security review (no prior context).
+> **Date:** 2026-04-26
+> **Scope:** the Agora monorepo as it stands post-ADR-0013 rebrand
+> (Andromeda → Agora). Includes all workspaces: `provider/`, `buyer/`,
+> `mcp/`, `registry/`, `dashboard/`, `web/`, `agents/dataset-seller/`,
+> `agents/market-monitor/`, `packages/agora-core/`.
+> **Mode:** code review + live probes against running mock-mode
+> services on `localhost:3000` (provider) and `localhost:3030`
+> (registry). Probes archived under `tmp/probe-*.mjs` (deleted at end
+> of audit).
 
-Independent security review. Auditor had no prior context. Methodology:
-read `README.md`, `PAYMYAGENT.md`, `docs/BUILD-SUMMARY.md`, every ADR in
-`docs/decisions/`, then read source for every endpoint that mints a
-macaroon, verifies a signature, charges a sat, or persists trust. Live
-probes were executed against a local registry (port 3030) and provider
-(port 3000) in mock mode; throwaway probe scripts were written, run, and
-deleted.
-
-No code was modified.
-
----
-
-## Threat model summary
-
-The Andromeda system (multi-seller registry + Lightning-paywalled
-providers + MCP buyer) defends against four buckets of adversary:
-
-1. **Network attacker / replay** — captures HTTP traffic, replays signed
-   requests or paid macaroons. Defended by Ed25519 signed-request headers
-   with ±5min clock skew, HMAC-signed L402 macaroons with `exp`, and (on
-   the main provider) a `consumed` flag in the invoices table.
-2. **Off-protocol grifter** — calls endpoints without auth, hoping
-   something is open. Defended by signed-request middleware on all
-   `POST` endpoints to the registry, L402 challenge on every paid path,
-   and HTTP-Basic on `/v1/stats`.
-3. **Sybil rater / honor inflator** — registers many pubkeys to game
-   the seller-honor leaderboard. Defended (per ADR 0010) by the
-   "transacted in last 30 days" rule before a buyer can rate.
-4. **Insider seller / reviewer fraud** — a registered seller files a
-   review of itself, gets a colluding reviewer assigned, and badges
-   itself; or a reviewer submits a low-effort review and pockets escrow.
-   Defended (per ADR 0010) by blind random reviewer assignment with
-   exclude-self, plus reviewer-side slashing.
-
-This audit confirms #1 and #2 are robust. #3 and #4 fail in critical
-ways: the "transacted within 30 days" check is enforced against the
-registry's own ledger, but **the seller is the sole signer of the
-transaction record** and the seller may write **any string they like**
-in `buyer_pubkey`, including a Sybil pubkey they also control. The
-exploit recipe is below (P0).
+This audit supersedes the previous `audit-security.md`. It reports the
+status of every previously-reported P0/P1, plus rebrand-introduced
+exploits and standard-pattern checks.
 
 ---
 
-## Per-category findings
+## 1. Threat model summary
 
-### A. Signature integrity (Ed25519 signed requests)
+The system mediates Lightning-paid agent-to-agent commerce. Trust is
+asymmetric:
 
-| Test                                    | Result    |
-|-----------------------------------------|-----------|
-| Replay with stale timestamp (10min old) | Rejected (401 "timestamp outside ±5min window") |
-| Signature stripping                     | Rejected (401 "missing signature headers") |
-| Cross-pubkey: sign with A, body claims pubkey B | Rejected (403 "body pubkey must match signing pubkey") on `/v1/sellers/register`. Same pattern on `/v1/transactions/record` (seller-pubkey check). |
-| Forged Ed25519 signature                | Rejected (401 "signature invalid") via `verifyUtf8` returning false. |
+- **Sellers** are pseudonymous Ed25519 pubkeys; honor accumulates from
+  buyer ratings + peer reviews. Honor is the only social signal a buyer
+  has; inflating it grants a seller economic advantage at no cost.
+- **Buyers** are pseudonymous; their primary attack value is being able
+  to spoof identity (claim a transaction, claim a rating, claim a
+  dispute) without paying. A successful spoof inflates *someone else's*
+  honor or *their own* rating power.
+- **Reviewers** are pseudonymous; their honor is at stake on every
+  review. A successful slash from a third party destroys 50 honor and
+  refunds the requester's escrow — a cheap economic weapon.
+- **Subscriptions** carry a real sat balance; mutating one without auth
+  is direct theft (refund) or denial-of-service (cancel).
 
-Crypto core is sound: `@noble/ed25519` v2 + sha512 sync hook in
-`packages/andromeda-core/src/crypto.ts`. The canonical-string format
-(`<METHOD>\n<PATH>\n<sha256-of-body-or-empty-string>\n<TIMESTAMP>`) binds
-method, path, body hash, and timestamp; replay outside the window
-fails. `verifyRequest` rejects on `Math.abs(now - ts) > window`.
+Adversaries assumed: any unauthenticated party with HTTP access to
+the registry, the provider, the dataset-seller, the market-monitor,
+and (locally) the MCP control plane. We do **not** assume a malicious
+process colocated with the user's Node runtime (private-key
+exfiltration via filesystem is in scope only because the rebrand was
+expected to tighten file modes; it didn't).
 
-**No P0/P1 findings in this category.** One P3:
+The macaroon HMAC byte-format and the Ed25519 signed-request
+canonical-string format are FROZEN per ADR 0013 §Decision; they were
+not re-audited.
 
-- **P3 — `/v1/transactions/record` body fields are unvalidated beyond
-  presence.** The seller signs the row, and the `seller_pubkey` field
-  must match the signer (good), but `buyer_pubkey` is an opaque string
-  with no signature loop-back. This isn't a vulnerability of the
-  signature scheme itself — it's a model gap (see P0-1 below).
-
-### B. L402 paywall integrity (provider)
-
-| Test                                          | Result    |
-|-----------------------------------------------|-----------|
-| Forged macaroon (random HMAC tail)            | Rejected (401 "invalid or expired macaroon") |
-| Cross-resource replay: macaroon scoped to listing-verify, replayed on order-receipt | Rejected (401 "macaroon scoped to a different resource") |
-| Single-use enforcement: same macaroon+preimage replayed twice on listing-verify | First call 200; second call 409 "already_consumed" |
-| Pay one, consume one: `markInvoiceConsumed` is `UPDATE … WHERE status IN ('pending','paid')` (atomic) | Race-safe via SQLite atomic UPDATE |
-| Preimage check: SHA256(preimage) === payment_hash | Enforced in `verifyAuth` line 134-136 |
-| Macaroon `exp` check                          | Enforced in `verifyMacaroon` (provider/src/lib/l402.ts:55) |
-| HMAC compare uses `timingSafeEqual`           | Yes (l402.ts:49–52) |
-
-The provider's L402 implementation is the strongest part of the
-codebase. **No P0/P1 findings.**
-
-**P1 — Dataset seller does NOT enforce single-use on its L402 macaroons.**
-`agents/dataset-seller/src/server.js:236–267` verifies macaroon HMAC,
-checks resource scope, and verifies preimage, but uses an **in-memory**
-map (`invoices`) that is `delete()`d after first success. The macaroon
-itself remains valid until `exp` (300 s by default). After the
-provider deletes the invoice, replaying the same `Authorization: L402
-<macaroon>:<preimage>` succeeds again because:
-
-1. `verifyMacaroon(parsed.macaroon, L402_SECRET)` ignores the in-memory
-   map — it only checks HMAC + `exp`.
-2. `verifyPreimage` ignores it — it only checks SHA256(preimage) ===
-   payment_hash.
-3. `invoices.delete(macBody.payment_hash)` happens AFTER verification;
-   the next call simply does nothing on a missing key.
-
-Net effect: a buyer who paid once for a 5,000-sat dataset can mint
-unlimited 24-hour signed download URLs for 5 minutes (until macaroon
-exp). The platform-fee counter (`recordTx`) is also re-incremented per
-replay, polluting platform revenue accounting.
-
-This contradicts the provider's frozen contract (`provider/src/lib/l402.ts`
-has the SQLite-backed `markInvoiceConsumed` flip; the dataset seller
-reimplemented L402 without that anchor). Severity: **P1** (one-time
-financial loss capped at 5 min × replay rate × URL freshness, but the
-spec is broken and signed URLs are valid for 24 h afterwards).
-
-**P2 — `agents/dataset-seller`: signed download URL secret falls back to
-the literal string `"fallback"` when `L402_SECRET` is unset.**
-`agents/dataset-seller/src/server.js:126,133`:
-```
-createHmac("sha256", L402_SECRET || "fallback").update(payload)
-```
-A misconfigured deployment with no `L402_SECRET` produces predictable
-signed URLs anyone can mint. Same anti-pattern in
-`agents/market-monitor/src/server.js:153` for alert signatures. Both
-emit a `console.warn` if `L402_SECRET.length < 32`, but they don't
-exit; ops can ignore the warning. Severity: **P2**.
-
-### C. Wallet safety / budget guardrails
-
-| Test                                                  | Result          |
-|-------------------------------------------------------|-----------------|
-| `MOCK_MODE=true` honored at wallet boundary           | Yes — `wallet()` selector in provider/src/lib/wallet.ts:88, and `MOCK = process.env.MOCK_MODE === "true"` in mcp/lumen-client.js:26 |
-| Real NWC client never instantiated in mock mode       | Yes — `_ln=null` short-circuits in mock |
-| Per-call cap (`MAX_PRICE_SATS`)                       | Enforced in lumen-client.js:61 |
-| Kill-switch refuses paid tools                        | Enforced in budget.js:78–80 (`reserve()` returns "kill_switch_active") |
-| Kill-switch persisted across MCP reload                | Yes — `.mcp-session.json` stores `kill_switch_active` |
-| Budget reset clears spent-counter                     | Yes — `setBudget` zeroes `spent` (budget.js:99). Note: per ADR 0006, "Resetting the budget does NOT auto-disable the kill-switch" — the `setBudget` function correctly leaves `kill_switch_active` untouched. |
-
-**P1 — Budget cap can be bypassed by parallel tool calls (TOCTOU).**
-`mcp/budget.js` exposes `reserve(amount)` and `confirm(amount)` as
-SEPARATE calls. `reserve` checks `state.spent + amount > state.budget`
-but does not mutate `state.spent`. `confirm` adds `amount` to
-`state.spent`. The MCP client (`mcp/lumen-client.js:65–70`) does:
-
-```
-const reason = reserve(challenge.amount_sats);   // CHECK ONLY
-if (reason) throw …;
-const { preimage, fees_paid } = await pay(challenge);   // ASYNC PAY
-confirm(challenge.amount_sats);                  // MUTATE
-```
-
-Two concurrent tool invocations (e.g., the model issues
-`andromeda_verify_listing` and `andromeda_file_receipt` in parallel via
-the same MCP session) both pass the `reserve()` check on the same
-unmodified `state.spent`, both proceed through `await pay(...)`, and
-both eventually confirm — overspending the cap by N×price.
-
-Concretely with `MAX_BUDGET_SATS=200` and four concurrent 240-sat
-verifies: each `reserve(240)` sees `spent=0`, all four pass, all four
-pay, total spent=960 — **4.8× the cap**. The bug is in the contract,
-not the test scaffold.
-
-The single-process, single-thread Node event loop makes this less
-common than a multi-process race, but `await pay(...)` yields control
-and parallel calls do interleave. Severity: **P1** because the budget
-guardrail is the thing keeping a buggy LLM from draining a wallet.
-
-**P2 — Budget state on disk is best-effort; `save()` swallows errors.**
-budget.js:46–52 — if the file write fails (read-only mount, EACCES,
-quota), the in-memory budget continues to debit, but a process restart
-re-loads stale state. Could allow budget circumvention via crash-loop:
-spend → kill provider before save flushes → restart loads pre-spend
-state. The state writer doesn't fsync. Severity: **P2** for live
-deployment; **P3** in the demo context.
-
-**P3 — No integrity check on `.mcp-session.json`.** A user who can
-write to the session file (or any program running as them) can flip
-`kill_switch_active=false` or zero `spent`. Not exploitable by network
-adversaries but worth noting since the file is treated as authoritative.
-
-### D. Peer-review escrow integrity
-
-| Test                                                  | Result          |
-|-------------------------------------------------------|-----------------|
-| Submit review for a request you weren't assigned       | Rejected (409 "you are not the assigned reviewer") |
-| Self-review: same identity asks for review of itself  | Rejected — `pickRandomReviewer(excludePubkey)` excludes the requester (registry/src/lib/reviews.ts:14). With one available identity (the requester), 409 "no reviewers available." |
-| Reviewer can be slashed without slashing event        | Slashing always inserts a `slashing_events` row (reviews.ts:154–157). |
-| Submission validates rubric (5-char min justifications, scores 0..5) | Yes — `validateReviewSubmission` in `packages/andromeda-core/src/review-rubric.ts:34–48`. |
-| Escrow split 95/5 on honest review                    | Confirmed: 200-sat escrow → 190 reviewer + 10 platform. |
-
-**P0 — Anyone can slash any reviewer.** `POST /v1/reviews/:id/dispute`
-(`registry/src/app/api/v1/reviews/[id]/dispute/route.ts`) requires only
-that the dispute body be Ed25519-signed by SOME identity — there is no
-check that the disputer is the requester, the buyer of the subject, or
-even has any relationship with the review. Because `slashReviewer`
-unconditionally applies `-50` honor and clawbacks the entire escrow
-back to the requester, any registered actor can:
-
-1. Watch `/v1/reviews/assigned?reviewer_pubkey=<R>` (public read) to
-   find a reviewer's open submissions.
-2. POST `/v1/reviews/<review_id>/dispute` signed with a fresh
-   throwaway keypair and `{reason: "fraud"}`.
-3. The reviewer loses 50 honor; the requester gets back the escrow
-   (full clawback).
-
-Live probe (recipe in `tmp_probe2.mjs t12_dispute_smart`): a
-freshly-generated `RANDO` keypair successfully disputed a review
-submitted by `R`. Server response:
-
-```
-{"ok":true,"honor_delta":-50,"escrow_returned":80,"event_id":"slash_…"}
-```
-
-This is a denial-of-trust primitive: an attacker can grief every
-reviewer in the registry until none remain available. The dispute path
-also serves as a **collusion vehicle**: a seller who paid for a review
-can dispute it via a clean throwaway pubkey if they don't like the
-score, then re-request and gamble for a more lenient reviewer — at no
-cost beyond gas. The route's own comment honestly admits *"Phase 5
-v0: trust the dispute (a real implementation would run silent
-re-review here)"* — but the limitation is not surfaced in
-`docs/BUILD-SUMMARY.md`'s "Known limitations" except indirectly
-("Phase-5 silent re-review sampling isn't running. The dispute path
-slashes on demand based on user input"). Severity: **P0**.
-
-**P1 — Dispute does not check that the review still exists in the
-right state, or that the request is unresolved.** Repeated disputes
-of the same review work because `slashReviewer` is idempotent only on
-the slashing-events table; there's no check that
-`review_requests.status != 'slashed'` before clawing escrow again.
-This isn't easy to weaponize (escrow is set to 0 on first slash in the
-review_requests row, but the seller's honor takes another -50 each
-time). Severity: **P1**.
-
-**P3 — Reviewer assignment is not as blind as advertised.** ADR 0010
-admits the seller's pubkey is discoverable from `service_id` (which
-embeds `seller_pubkey.slice(0,8)` per `db.ts:upsertService`). With 8
-hex chars (32 bits), the prefix is ~de-anonymizable: in a registry of
-N sellers, the chance of two identical 8-hex prefixes is N²/2³³.
-Already noted in `docs/audit-design.md` C-2.
-
-### E. Sybil & reputation
-
-**P0 — Self-rating attack succeeds: an attacker can inflate honor
-arbitrarily by registering both seller and "buyer" pubkeys.**
-
-Recipe (validated live; results captured in probe output):
-
-1. Attacker generates two Ed25519 keypairs: `seller`, `buyer`.
-2. Attacker `POST /v1/sellers/register` signed by `seller`. (Status: 200.)
-3. Attacker `POST /v1/transactions/record` signed by **`seller`** with
-   body `{seller_pubkey: seller.pub, buyer_pubkey: buyer.pub,
-   payment_hash: random32bytes, amount_sats: 100, …}`. The route
-   (`registry/src/app/api/v1/transactions/record/route.ts:30`) checks
-   only that `seller_pubkey === auth.pubkey` — i.e. the seller signs
-   their own ledger entry. The `buyer_pubkey` field is **never
-   verified**: it's a free-form string. (Status: 200, recorded:true.)
-4. Attacker `POST /v1/sellers/<seller.pub>/rate` signed by `buyer`
-   with `{stars: 5}`. The handler calls `rateSeller`
-   (`registry/src/lib/reviews.ts:49–69`), which checks "did this buyer
-   transact with this seller in the last 30 days?" by querying the
-   transactions ledger — and YES, the row inserted in step 3 satisfies
-   the check. Honor += 2. (Status: 200, new_honor:2.)
-
-Loop steps 3–4 with N fresh `buyer` keypairs to inflate honor by 2N
-per iteration. Cost: zero (no Lightning settlement is required because
-the seller is asserting their own sales record into the registry; the
-provider's L402 path is bypassed entirely for the registry-side
-attack). The provider DOES enforce real-payment settlement before
-calling `recordTxFireAndForget`, but **the registry has no way to
-verify a recorded transaction was settled on-chain** — it trusts the
-seller's signature.
-
-A 5-iteration probe in `tmp_probe2.mjs t9` confirmed honor reached the
-expected accumulated value with five Sybil "buyers."
-
-ADR 0010 §"Honor model" anticipates this only for buyer-rating
-fraud, not seller-side ledger forgery: *"Buyers who submit fraudulent
-ratings (caught by the dispute path) lose ALL their pending honor and
-are barred from rating that seller again. (Not implemented in Phase 5
-v0 — flagged in docs/BUILD-BLOCKERS.md if necessary.)"* The spec
-assumes the buyer pubkey is bound to a real Lightning payment; the
-implementation never makes that binding. Severity: **P0**.
-
-**Mechanism that DOES prevent some abuse:** the `30-day cutoff` on
-buyer ratings (reviews.ts:56–62) does correctly stop a buyer from
-rating someone they've never transacted with — IF the ledger entries
-are honest. The flaw is that the ledger entries are not honest:
-they're seller-signed claims.
-
-**P0 — The `x-andromeda-pubkey` header on provider paid endpoints lets
-the buyer (or an attacker controlling the network path) write any
-string into the registry's `buyer_pubkey` column.** The provider's
-`recordTxFireAndForget` call in
-`provider/src/app/api/v1/listing-verify/route.ts:38` reads:
-
-```
-buyer_pubkey: req.headers.get("x-andromeda-pubkey"),
-```
-
-That value is not verified. Any HTTP client can set it to a Sybil
-pubkey it controls. Combined with a real (mock or mainnet) L402
-payment, this lets an attacker make the registry believe an
-attacker-controlled "buyer" pubkey transacted with the seller. The
-registry then accepts a 5-star rating from that pubkey. Live probe in
-`tmp_probe2.mjs t14` confirmed 200 OK with the spoofed buyer header.
-
-This is the same Sybil primitive as P0-Self-Rating but funneled
-through a real provider payment. Even with mainnet sats moving, the
-attacker's cost is ~240 sat per rating ($0.16 at $67k/btc), which
-funds an unbounded honor inflation: 240 sats per +2 honor = 120 sats
-per 1-honor unit. A 1,000-honor inflation costs $160 of real Lightning
-sats moved between two attacker-controlled wallets — round-tripped
-through Alby. Severity: **P0**.
-
-### F. Privacy
-
-**P2 — Subscription endpoints leak across buyers.**
-`/api/v1/subscriptions/{id}/alerts` (provider and market-monitor) is
-**unauthenticated**. Anyone who knows or guesses a `subscription_id`
-(24-char base16 from `randomUUID().replace(/-/g,'').slice(0,24)`,
-i.e. ~96 bits) can read every alert ever delivered to any subscriber,
-including their pubkey on the GET-by-id endpoint
-(`/api/v1/subscriptions/{id}`). 96 bits of unguessable entropy is
-ample, but the URL leaks anywhere it shows up: logs, request-tracing,
-proxy histories, browser caches.
-
-**P0 — Subscriptions are unauthenticated. ANY caller can subscribe on
-behalf of any pubkey, top-up any subscription, or cancel any
-subscription.** Live probe confirmed `POST /api/v1/subscribe` accepts
-arbitrary `subscriber_pubkey`. The provider route
-(`provider/src/app/api/v1/subscribe/route.ts`) and market-monitor's
-inline handler both call `createSubscription` with no signature check.
-
-The top-up route (`provider/src/app/api/v1/subscriptions/[id]/topup/route.ts`)
-runs `topUpSubscription(id, body.sats)` without ANY payment or
-signature step — the literal code path increments the balance counter
-in SQLite based purely on a request body. This is acknowledged in
-ADR 0005 and BUILD-SUMMARY §"Phase-2 subscribe trust-deposits" but is
-not gated to mock mode: in real mode the same code runs, no actual
-sats arrive, and the buyer's "balance" is arbitrary.
-
-Cancel similarly takes no auth; the response advertises `refunded_sats`
-which would imply a real-mode NWC payback, but ADR 0005 §"Cancel
-returns balance" admits the real-mode refund is deferred. In mock
-mode, ANY caller can cancel ANY subscription and receive a phony
-`refunded_sats` value. In real mode, the seller sends sats to whoever
-they think the subscriber is — but they were trusted to know that on
-subscribe, when no signature was checked. Severity: **P0** (because
-nothing about this matches the user-facing claim that subscriptions
-are paid prepaid balances).
-
-**P3 — Local control-token at `~/.andromeda/control-token` is mode-0600
-on Linux/macOS, best-effort on Windows.** `mcp/control-plane.js:42`
-passes `mode: 0o600` to `writeFileSync`, which is honored on POSIX. On
-Windows the host filesystem ACLs apply; a local user-process boundary
-is the only protection. The code admits this in a comment (line 43)
-but doesn't take a defensive step like calling `fs.chmod` on
-re-invocation, or warning the user. Acceptable for a local-trust
-demo, but worth noting per the audit prompt.
-
-### G. Misc / hardening
-
-**P1 — Rate limiting is bypassed by spoofing `x-forwarded-for`.**
-`provider/src/lib/ratelimit.ts:16–21` — `ipFrom(req)` reads the first
-value of `x-forwarded-for`, which is fully attacker-controlled when
-the provider runs without a real reverse proxy stripping/setting that
-header. Live probe (50 requests with `x-forwarded-for: 1.2.3.<i>` for
-i in 0..49): **0/50 rate-limited**. Same 50 requests with a constant
-IP: 14/50 rate-limited. Severity: **P1** when the provider is exposed
-publicly without a trusted reverse proxy.
-
-**P2 — Admin endpoints default to `dev-admin-secret` if `ADMIN_SECRET`
-isn't set.** `registry/src/app/api/v1/admin/decay/route.ts:14` and
-`registry/src/app/api/v1/platform/revenue/route.ts:10`:
-
-```
-const expected = process.env.ADMIN_SECRET ?? "dev-admin-secret";
-```
-
-A registry running with the default env passes `x-admin-secret:
-dev-admin-secret` for full admin access — including
-`/v1/admin/fast-forward` which back-dates all sellers' `last_active_at`
-(can force-decay every seller's honor). Live probe confirmed both
-`/admin/decay` and `/platform/revenue` return 200 with the default
-secret. Severity: **P2** (well-known footgun; comparable to default
-passwords).
-
-**P3 — HTTP Basic auth on `/v1/stats` uses non-constant-time string
-compare.** `provider/src/lib/admin-auth.ts:30`:
-
-```
-if (u !== user || p !== pass) { return errorResponse(...); }
-```
-
-Should use `crypto.timingSafeEqual`. Practical timing leakage over
-LAN/WAN is hard to weaponize; severity: **P3**.
-
-**P3 — `signing_secret` for the slashing-event audit log defaults to
-`"registry-default-secret-please-set-something-stronger"`** when
-neither `ANDROMEDA_REGISTRY_SECRET` nor `L402_SECRET` is set.
-`registry/src/app/api/v1/reviews/[id]/dispute/route.ts:19`. Even with
-a strong secret, the HMAC just signs the row's own audit log; it
-doesn't gate any write. Mostly cosmetic. Severity: **P3**.
-
-**P3 — `~/.andromeda/control-port` and `subscriptions.json` paths are
-not mode-checked at every read.** `mcp/control-plane.js`:32 calls
-`fs.mkdirSync(... mode: 0o700)` on first creation, but if the dir
-exists with weaker perms, no chmod happens. Severity: **P3**.
-
-**P3 — Provider's `fire-and-forget` registry write does not retry or
-log durably.** A network blip between provider and registry silently
-drops the transaction. Not an attacker primitive but means the
-honor-rate path (which depends on transactions being recorded) can be
-silently starved. Out of scope for security per se; flagged because
-it's the underlying cause of test flakiness referenced in BUILD-SUMMARY.
+The signed-request verifier supports three header families
+(`X-Agora-*`, `X-Andromeda-*`, `X-Lumen-*`), with `family` returned in
+`VerifyResult`. The verifier picks the first family for which all
+three headers are *present*, then validates only that family's
+signature. This is rebrand-1 + rebrand-2 backward compatibility.
 
 ---
 
-## Specific exploits that worked (live, in mock mode)
+## 2. Per-category findings
 
-| ID  | Severity | Exploit                                                                                                            | Source endpoint                                |
-|-----|----------|--------------------------------------------------------------------------------------------------------------------|------------------------------------------------|
-| E-1 | P0       | Sybil honor inflation via seller-signed forged transactions + Sybil-buyer-signed ratings. ~zero cost.              | `/v1/transactions/record` + `/v1/sellers/:pubkey/rate` |
-| E-2 | P0       | Honor inflation via spoofed `x-andromeda-pubkey` header on real L402 paid endpoint, then Sybil-buyer rating. Cost: per-rating L402 price. | `/api/v1/listing-verify` (header) + `/v1/sellers/:pubkey/rate` |
-| E-3 | P0       | Anyone can dispute any review with a throwaway keypair, slashing the reviewer -50 honor and clawing back escrow.   | `/v1/reviews/:id/dispute`                      |
-| E-4 | P0       | Anyone can subscribe on behalf of any pubkey; anyone can top up any subscription for free; anyone can cancel any subscription. | `/api/v1/subscribe`, `.../topup`, `.../cancel` |
-| E-5 | P1       | Dataset-seller does not enforce single-use on its L402 macaroons. Pay once → unlimited signed download URLs for ~5 min. | `agents/dataset-seller POST /api/v1/dataset/:id/purchase` |
-| E-6 | P1       | Budget cap bypass via parallel tool calls (TOCTOU between `reserve()` and `confirm()` in `mcp/budget.js`).         | MCP `mcp/lumen-client.js` callPaidEndpoint     |
-| E-7 | P1       | Rate-limit bypass on provider via spoofed `x-forwarded-for`.                                                       | `/api/v1/listing-verify`, `/api/v1/order-receipt` |
-| E-8 | P2       | Admin endpoints accept the default secret `dev-admin-secret`.                                                      | `/v1/admin/decay`, `/v1/admin/fast-forward`, `/v1/platform/revenue` |
-| E-9 | P2       | Anyone can read every alert delivered to any subscription, given the subscription_id.                              | `/api/v1/subscriptions/:id/alerts`             |
-| E-10| P2       | `agents/dataset-seller` and `agents/market-monitor` use HMAC secret `"fallback"` if `L402_SECRET` is unset.        | `signDownloadUrl`, `signAlert`                 |
+### 2.1 Signature integrity (incoming)
+
+- **Family-pinning at the verifier (`packages/agora-core/src/signed-request.ts`)** — once a family is chosen by presence-of-three-headers, the signature is verified ONLY against that family's three values. Cross-family confusion (e.g. `X-Agora-Pubkey: A` + `X-Andromeda-Sig: B`) is **not exploitable** because:
+  1. If the higher-priority family is incomplete, the verifier falls through to the next.
+  2. Once a family is chosen, the OTHER family's headers are never consulted by `verifyRequest`.
+- **Family-downgrade attempts** — verified probes (`tmp/probe-rebrand.mjs`) confirmed: a request that supplies AGORA-Pubkey only (no AGORA-Sig/Timestamp) plus a complete ANDROMEDA family **does** fall through to the ANDROMEDA family at the core verifier. **However**, the registry's wrapper (`registry/src/lib/sig.ts`) explicitly checks that the canonical AGORA headers are present before invoking `verifyRequest` and returns 401 "missing signature headers" otherwise. **Net result on the registry: ANDROMEDA-only and LUMEN-only signed requests are REJECTED.** This contradicts the README + BUILD-SUMMARY claim that all three families are accepted on incoming requests; treated as a **finding** below (P3, doc/behavior mismatch — though the actual behavior is *more* secure than documented).
+- **Replay-window:** the canonical string includes a millisecond timestamp; window enforced at ±5 min (`SIGNATURE_VALIDITY_MS`). No nonce store, but the timestamp window is small enough that this is a low-impact replay risk.
+- **Cross-pubkey replay:** the canonical string includes path + body-hash; signatures are not bound to the receiver, so a request signed for `/api/v1/sellers/register` cannot be replayed against `/api/v1/transactions/record`. No issue.
+
+### 2.2 Signature integrity (provider buyer-attribution)
+
+- The provider's `/api/v1/listing-verify` and `/api/v1/order-receipt` routes — and the dataset-seller's `/purchase` — read the **naked** buyer-pubkey header `x-agora-pubkey` (or its legacy aliases) **without verifying any signature against it**. The header is then forwarded to `recordTxFireAndForget` and persisted as `transactions.buyer_pubkey` in the registry, where it gates rating eligibility. **This is the live P0-2 exploit (still present, family-expanded to include `x-lumen-pubkey`).**
+
+### 2.3 L402 paywall
+
+- Macaroon HMAC byte-format frozen and verified with `timingSafeEqual` (good).
+- Macaroon body includes `resource`; cross-resource replay rejected at provider AND dataset-seller. **Confirmed defense.**
+- **Provider** persists invoice rows and atomically transitions `pending → consumed`; second consumption returns 409. **Single-use macaroon enforced.** (`provider/src/lib/l402.ts:148-157`)
+- **Dataset-seller** does **NOT** enforce single-use macaroon: line 264 does `invoices.delete(macBody.payment_hash)` but never gates on its presence. Two parallel calls with the same `(macaroon, preimage)` both pass — **macaroon replay possible**, especially in concurrent flows. New finding: **NEW-1, P1**.
+- **Market-monitor** does not paywall its subscription mutations at all, so L402 is irrelevant there (see 2.4).
+- **Expired macaroon:** the body's `exp` is checked against `Date.now()/1000`; expired bodies return null. Good.
+
+### 2.4 Subscriptions
+
+- Both `provider/api/v1/subscribe` + `subscriptions/:id/topup`, `cancel`, and `agents/market-monitor` mirror endpoints accept the request **with no signature, no L402, and no ownership check**. Anyone with the `subscription_id` can cancel-for-refund or topup-as-griefing. (P0-4 confirmed below.)
+
+### 2.5 Wallet safety
+
+- **Mock-mode honored:** `provider/src/lib/wallet.ts` selects mock vs. real on `MOCK_MODE`; mock invoices use deterministic preimages and no NWC traffic. Confirmed.
+- **`/api/dev/pay` only enabled in mock mode:** correct guard. Confirmed.
+- **Per-call cap (MAX_PRICE_SATS):** enforced before reserving budget. Correct.
+- **Per-session budget (`mcp/budget.js`):** has a TOCTOU race between `reserve()` and `confirm()` — `reserve()` reads `state.spent` but does NOT debit; `confirm()` adds. Parallel calls can each pass `reserve()` and over-spend. (P1-2 confirmed below.)
+- **Kill-switch:** evaluated inside `reserve()` synchronously; flipping it via the control plane prevents new spends. Good. The flag persists to the same JSON state file.
+- **Control-plane bearer token comparison:** plain `===` string equality (`mcp/control-plane.js:103`); susceptible to timing leakage in theory. Practically low-impact on a localhost endpoint. **NEW-7, P3.**
+
+### 2.6 Peer-review escrow / honor
+
+- **Claim unassigned review:** `submitReview` checks `req.reviewer_pubkey !== args.reviewer_pubkey`. A reviewer cannot submit a review they were not assigned. Defense confirmed.
+- **Submit for self-paid review:** the review-request route picks a random reviewer ≠ requester pubkey. The requester cannot self-review. Defense confirmed.
+- **Slashing without buyer relationship (P0-3):** dispute route accepts any signed identity and slashes the reviewer for -50 honor. Confirmed exploitable below.
+- **Buyer-fraud slashing (claw escrow without slashing):** not implemented; `slashReviewer` always returns the escrow to the requester. The dispute route slashes on the same call, so an attacker can both slash a reviewer AND see the escrow returned to the (real) requester — a third party doing this is a free attack on the reviewer; the requester benefits financially without paying for the slashing themselves.
+
+### 2.7 Sybil / reputation
+
+- `transactions/record` accepts `buyer_pubkey` from the body; only the seller signs. (P0-1.)
+- `rateSeller` looks up `transactions WHERE buyer_pubkey=? AND seller_pubkey=?` to gate ratings. Combined with P0-1, an attacker registers as a seller, posts forged transactions citing sock-pubkeys, then those sock-pubkeys rate any seller that the attacker (as that seller) has "transacted" with. **Sybil 5-star (or 1-star competitor) inflation confirmed.**
+
+### 2.8 Privacy / file modes
+
+- `~/.agora/control-token` and `~/.agora/control-port` are written via `fs.writeFileSync(path, value, { mode: 0o600 })` but Windows NTFS does not honor the Unix mode argument; observed `stat` shows `644`. The token is therefore world-readable to any process running under the user's account. (Test-environment limitation; the auditor's working-principle note in the brief flags this as "approximate on Windows".)
+- `mcp/.env` and `provider/.env.local` are written **without any mode option** (`fs.writeFileSync(fp, line, "utf8")`, `fs.appendFileSync(...)`); observed `644` on POSIX semantics. Both files contain Ed25519 *private keys*. **NEW-2, P2.**
+- The state-dir migration (`packages/agora-core/src/state-dir.ts:71-82`) calls `fs.copyFileSync(s, d)` without explicitly setting the destination mode. Node's `copyFileSync` preserves the source mode bits; if `~/.andromeda/control-token` was 644, the migrated `~/.agora/control-token` is also 644. The MIGRATED-FROM-ANDROMEDA marker is written with `mode: 0o600` (line 60), but everything else inherits whatever was there.
+- `transactions.log` (which contains buyer/seller pubkeys + payment_hashes + amounts) is mode 644.
+
+### 2.9 Admin endpoints
+
+- `/api/v1/admin/decay`, `/api/v1/admin/fast-forward`, `/api/v1/platform/revenue` all default to `ADMIN_SECRET ?? "dev-admin-secret"`. The default is hard-coded plaintext in three files. Any party with HTTP access can force decay (cratering inactive sellers' honor), backdate sellers, or read total platform revenue. **NEW-3, P1.**
+- The slashing-event signing-secret (`registry/src/app/api/v1/reviews/[id]/dispute/route.ts:23`) defaults to `"registry-default-secret-please-set-something-stronger"`. Any party reading the source can forge slashing-event audit signatures. **NEW-4, P2** (low impact — the audit log is local to the registry DB and the signature is decorative; but the spec presents it as a tamper-evidence mechanism).
+
+### 2.10 Rate limiting
+
+- IP extraction in `provider/src/lib/ratelimit.ts:16-21` reads `x-forwarded-for` first, then `x-real-ip`, no allowlist of trusted proxies. Bypass confirmed below (P1-3).
+
+### 2.11 Migration shim
+
+- `state-dir.ts` migration is non-destructive (legacy dir preserved). It does **not** copy with stricter modes; if the source was insecure, the destination inherits.
+- `mcp/budget.js`, `mcp/control-plane.js`, `provider/src/lib/registry-client.ts`, and several other files implement the env-var resolution chain `AGORA_X ?? ANDROMEDA_X ?? LUMEN_X` **inline** (rather than via `@agora/core`'s `readEnv`). This duplicates the chain in many places. None of them validate the value; whatever string the env supplies is trusted. If `AGORA_BUYER_PRIVKEY` is unset and `LUMEN_BUYER_PRIVKEY` is set to attacker-controlled bytes, the MCP server uses it. **NEW-5, P2** (informational — this is the documented behavior, but it widens the env-injection surface).
+
+### 2.12 Documented vs. actual behavior
+
+- README + BUILD-SUMMARY say "Verifier accepts EITHER family on incoming requests" / "Every Ed25519-signed endpoint accepts `X-Agora-*` (canonical), `X-Andromeda-*`, AND `X-Lumen-*` header families on incoming requests." **Actual:** the registry's `verifySignedRequest` wrapper requires the canonical AGORA headers be present, returning 401 otherwise. ANDROMEDA-only and LUMEN-only signed requests are rejected by the registry. This is *more secure* than the docs claim, but breaks the migration story for legacy buyers. Confirmed by probe `tmp/probe-rebrand.mjs`. **NEW-6, P3** (documentation/behavior mismatch).
 
 ---
 
-## Specific exploits that were prevented, with the mechanism
+## 3. Status of previous audit's findings
 
-| ID  | Attempted exploit                                                            | Mechanism that blocked it                                                                                          |
-|-----|------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| B-1 | Replay a 10-minute-old signed registry write                                 | `verifyRequest` rejects on `Math.abs(now - ts) > validityMs (5min)` — `signed-request.ts:95`                       |
-| B-2 | Strip signature headers and POST                                             | `verifySignedRequest` rejects on missing `x-andromeda-pubkey/timestamp/sig` — `registry/src/lib/sig.ts:16`         |
-| B-3 | Sign with key A, claim pubkey B in the body                                  | `register` route checks `body.pubkey === auth.pubkey` (403); `transactions/record` checks `seller_pubkey === auth.pubkey` (403) |
-| B-4 | Forged macaroon (random HMAC tail) presented to provider                     | `verifyMacaroon` recomputes HMAC and `timingSafeEqual`s — `provider/src/lib/l402.ts:42–57`                         |
-| B-5 | Cross-resource preimage: macaroon scoped `/v1/listing-verify` replayed on `/v1/order-receipt` | `verifyAuth` checks `body.resource !== expectedResource` (401)                                                     |
-| B-6 | Replay the same valid L402 token twice on the provider's listing-verify       | SQLite atomic transition `pending|paid → consumed` in `markInvoiceConsumed` (db.ts:217–225); 2nd request gets 409 |
-| B-7 | Submit a peer review for a request you weren't assigned to                   | `submitReview` checks `req.reviewer_pubkey === args.reviewer_pubkey` (409 "you are not the assigned reviewer")     |
-| B-8 | Self-review (same identity is requester + reviewer, only candidate available) | `pickRandomReviewer(excludePubkey)` filters `r.pubkey != excludePubkey` (returns null → 409 "no reviewers available") |
-| B-9 | Mock-mode-only `/api/dev/pay` and `/api/dev/fire-alert` reachable in real mode | Both routes early-return `if (process.env.MOCK_MODE !== "true")` — provider/src/app/api/dev/*/route.ts             |
+| ID    | Description                                                 | Status                |
+|-------|-------------------------------------------------------------|-----------------------|
+| **P0-1** | Sybil honor inflation via forged `/v1/transactions/record` | **Still exploitable** |
+| **P0-2** | Honor inflation via spoofed `x-andromeda-pubkey` header on listing-verify / order-receipt | **Worse** — three header families now spoofable (x-agora-pubkey, x-andromeda-pubkey, x-lumen-pubkey); also affects dataset-seller |
+| **P0-3** | Anyone can slash any reviewer via `/v1/reviews/:id/dispute` | **Still exploitable** |
+| **P0-4** | Subscriptions unauthenticated (subscribe / topup / cancel)  | **Still exploitable** (provider AND market-monitor) |
+| **P1-1** | Dataset-seller signed-URL replay within macaroon TTL        | **Still exploitable** — signed URL has 24h TTL, no buyer binding, no single-use; additionally **macaroon itself is replayable** at the dataset-seller (NEW-1) |
+| **P1-2** | Budget cap parallel-call TOCTOU between `reserve()` and `confirm()` | **Still exploitable** |
+| **P1-3** | Rate-limit bypass via spoofed `x-forwarded-for`             | **Still exploitable** |
 
----
+### 3.1 Live probe results
 
-## Dependency scan results
+| Probe                  | Outcome                                                                                  |
+|------------------------|------------------------------------------------------------------------------------------|
+| `tmp/probe-p0-1.mjs`   | Registered fake seller; forged tx with arbitrary buyer_pubkey accepted (`recorded:true, idempotent:false`); buyer-pubkey then successfully rated the seller 5-star. |
+| `tmp/probe-p0-2.mjs`   | Single 240-sat L402 call with `x-lumen-pubkey: <victim>` header → registry tx_count for vision-oracle-3 incremented with the victim's pubkey as buyer. |
+| `tmp/probe-p0-3.mjs`   | Random 3rd-party `attacker` pubkey disputed a legit review → reviewer's seller-honor row dropped to -50; escrow returned. |
+| `tmp/probe-p0-4.mjs`   | Subscribed (no auth, attacker-controlled subscriber_pubkey), topped-up to 6,000 sats, cancelled and was returned `refunded_sats:6000`. |
+| `tmp/probe-budget.mjs` | 5 parallel `reserve(300)` against `MAX_BUDGET_SATS=1000` all returned `null`; after 5 confirms, `spent_sats=1500` (50% over cap). |
+| `tmp/probe-rl.mjs`     | Same-IP burst: 35/60 succeeded, 25 blocked; rotated `x-forwarded-for` (10.0.0.0–10.0.0.59): 59/60 succeeded. |
+| `tmp/probe-rebrand.mjs` | ANDROMEDA-only or LUMEN-only signed `/sellers/register` rejected (401 "missing signature headers") — confirms registry hard-pins to AGORA family at the wrapper. |
+| `curl -X POST … x-admin-secret: dev-admin-secret` | `/v1/admin/fast-forward` and `/v1/platform/revenue` succeed with the hard-coded default secret. |
 
-`npm audit` per workspace (run 2026-04-26):
-
-| Workspace                       | Total | Critical | High | Moderate | Low |
-|--------------------------------|-------|----------|------|----------|-----|
-| `/` (root)                     | 2     | 0        | 0    | 2        | 0   |
-| `provider/`                    | 2     | 0        | 0    | 2        | 0   |
-| `registry/`                    | 2     | 0        | 0    | 2        | 0   |
-| `mcp/`                         | 0     | 0        | 0    | 0        | 0   |
-| `buyer/`                       | 0     | 0        | 0    | 0        | 0   |
-| `agents/market-monitor/`       | 0     | 0        | 0    | 0        | 0   |
-| `agents/dataset-seller/`       | 0     | 0        | 0    | 0        | 0   |
-
-The two moderate findings are the same advisory across the three
-workspaces that pull in Next.js: `postcss <8.5.10` (GHSA-qx2v-qp2m-jg93,
-"PostCSS has XSS via Unescaped `</style>` in its CSS Stringify Output",
-CVSS 6.1). PostCSS is a build-time transitive dependency of Next.js
-and not directly invoked by Andromeda code; the XSS path requires
-crafted `</style>` content reaching `CSS.stringify`, which Andromeda
-does not exercise. Risk in the runtime path is theoretical.
-
-No high/critical findings. No supply-chain pinning issues observed
-beyond standard `package-lock.json` hashes.
+(All probes have been deleted from `tmp/` post-audit; reproducers are easy to re-derive from this report.)
 
 ---
 
-## Summary table
+## 4. New exploits that worked
 
-- **P0 findings (4):** E-1 (Sybil rating via forged tx), E-2 (Sybil via
-  spoofed buyer header), E-3 (anyone slashes any reviewer),
-  E-4 (subscriptions are unauthenticated).
-- **P1 findings (3):** E-5 (dataset-seller no single-use),
-  E-6 (budget TOCTOU), E-7 (XFF rate-limit bypass).
-- **P2 findings (3):** E-8 (default admin secret), E-9 (subscription
-  alerts world-readable given id), E-10 (HMAC fallback secret).
-- **P3 findings (~7):** signing-secret defaults, non-constant-time
-  HTTP-Basic compare, mode-0600 best-effort on Windows, weak slashing
-  signing secret, unguarded fire-and-forget tx writes, etc.
+| ID | Severity | Finding |
+|----|----------|---------|
+| **NEW-1** | **P1** | **Dataset-seller macaroon replay.** `agents/dataset-seller/src/server.js:255-291` accepts the same `(macaroon, preimage)` from any caller. The line `invoices.delete(macBody.payment_hash)` does NOT gate on prior presence; two concurrent calls each pass macaroon+preimage verification and each receive a fresh signed download URL. Combined with **P1-1** (signed URL not bound to buyer + 24h TTL), one paid macaroon can be replayed indefinitely until it expires (`exp` from the macaroon body, currently 300s) — and within that window, every replay produces a fresh 24h download URL. |
+| **NEW-2** | **P2** | **Privkey files at world-readable mode.** `provider/.env.local` and `mcp/.env` are written via `fs.writeFileSync` / `fs.appendFileSync` with NO `mode` option, so they get the default umask. Observed `644` on POSIX semantics; same on Windows where NTFS doesn't honor Unix modes anyway. Both files contain Ed25519 private keys (`ANDROMEDA_PROVIDER_PRIVKEY`, `ANDROMEDA_BUYER_PRIVKEY`). |
+| **NEW-3** | **P1** | **Default admin secret (`"dev-admin-secret"`).** Three registry routes (`/v1/admin/decay`, `/v1/admin/fast-forward`, `/v1/platform/revenue`) compare `x-admin-secret` against `process.env.ADMIN_SECRET ?? "dev-admin-secret"`. The default is hard-coded; any party with HTTP access to the registry can force-decay all sellers, backdate sellers, or read platform revenue. Verified live with curl. |
+| **NEW-4** | **P2** | **Default slashing-event signing secret** (`"registry-default-secret-please-set-something-stronger"`). The dispute route's `SIGNING_SECRET` falls back to a literal-string value if `AGORA_REGISTRY_SECRET` / `ANDROMEDA_REGISTRY_SECRET` / `L402_SECRET` are all unset. Any reader of the source can forge `slashing_events.signature` rows. |
+| **NEW-5** | **P2** | **Inline env-var fallback chain duplicated everywhere, with no validation.** `mcp/identity.js`, `mcp/control-plane.js`, `mcp/budget.js`, `provider/src/lib/identity.ts`, `provider/src/lib/registry-client.ts`, `agents/dataset-seller/src/server.js`, etc. each independently re-implement `AGORA_X ?? ANDROMEDA_X ?? LUMEN_X`. None validate the resulting value (length, format, hex-ness). If `AGORA_BUYER_PRIVKEY` is unset and `LUMEN_BUYER_PRIVKEY` is set to attacker-controlled bytes (e.g. via a shared shell config injected through `direnv`), the MCP server signs requests with whatever the attacker chose. The fallback chain itself is documented behavior; the *lack of validation in the fallback path* is the issue. |
+| **NEW-6** | **P3** | **Doc/behavior mismatch on header families.** README, BUILD-SUMMARY.md, and ADR 0013 all assert that ANDROMEDA-only and LUMEN-only signed requests are accepted. The registry's `verifySignedRequest` wrapper rejects them. Net: existing buyers signing with X-Andromeda-* will see all their writes 401. |
+| **NEW-7** | **P3** | **Control-plane bearer-token timing leak.** `mcp/control-plane.js:103` compares `token === _token` directly. Localhost-only mitigates impact. |
+| **NEW-8** | **P3** | **Provider admin auth ignores rebrand chain.** `provider/src/lib/admin-auth.ts` reads only `LUMEN_ADMIN_USER` / `LUMEN_ADMIN_PASS`, not the AGORA / ANDROMEDA chain — so admin endpoints are silently disabled on a fresh AGORA install (the credentials never resolve). Same string also uses `!==` rather than `timingSafeEqual`. |
 
 ---
 
-## Notes on scope
+## 5. New defenses confirmed working
 
-- Real-mode mainnet was not exercised. Mock-mode L402 settlement is
-  represented by an in-process map; real-mode adds an
-  `nwcClient.lookupInvoice` call before the consume flip
-  (provider/src/lib/l402.ts:139–143). The auth-side primitives are the
-  same in both modes; payment-settlement bypass requires compromising
-  the NWC backend (out of scope).
-- The Tauri desktop GUI was confirmed deferred (ADR 0006); only the
-  headless `mcp/control-plane.js` was reviewed.
-- The Phase-7 public web index (`web/`) is a stub and was not reviewed.
+- **Family-pinning at the verifier:** once a family is selected by full-headers-present, the signature is validated *only* against that family. Cross-family confusion attacks (e.g. mixing `X-Agora-Pubkey` with `X-Andromeda-Sig`) are not exploitable.
+- **Registry hard-pins to AGORA family at the wrapper level** (`registry/src/lib/sig.ts`). Even though the underlying verifier supports three families, the registry rejects ANDROMEDA-only / LUMEN-only requests with 401. This is *more secure than documented* — but, as noted, it breaks the documented backwards-compat story (NEW-6).
+- **Macaroon resource-binding:** macaroons minted for `/v1/listing-verify` cannot be replayed at `/v1/order-receipt`, and provider macaroons cannot be replayed at the dataset-seller's `/purchase`.
+- **Provider single-use macaroon enforcement:** atomic `pending → consumed` transition rejects double-spend with 409.
+- **Mock-mode `/api/dev/pay` guard:** dataset-seller, market-monitor, and provider all return 404 when MOCK_MODE is false.
+- **Migrations are non-destructive:** `~/.andromeda/` is preserved when `~/.agora/` is created.
+- **CORS lockdown on control plane:** only one allowed dev origin (`http://localhost:5173`); `*` is not used; preflight from arbitrary origins returns 403.
+- **`recordTransaction` idempotency:** SQLite `payment_hash UNIQUE` prevents duplicate-tx amplification of the same forged record.
+- **Reviewer-pickedness check** in `submitReview`: a non-assigned reviewer cannot submit on someone else's review_request.
+- **Buyer-cooldown on rating:** 30-day transaction window. Mostly ineffective because P0-1 forges the tx, but it's at least gating against pure-anonymous ratings.
+- **Timing-safe macaroon HMAC compare** in both `provider/src/lib/l402.ts` and `packages/agora-core/src/l402.ts`.
 
-No fixes are proposed in this document.
+---
+
+## 6. Dependency scan results
+
+`npm audit` per workspace (Node 20.19.0, npm v10):
+
+| Workspace             | Vulns | Highest | Detail |
+|-----------------------|-------|---------|--------|
+| Root (`lumen`)        | 4     | moderate | esbuild ≤0.24.2 (GHSA-67mh-4wv8-2f99); postcss <8.5.10 in next (GHSA-qx2v-qp2m-jg93); vite ≤6.4.1 path-traversal (GHSA-4w7w-66w2-5vf9) |
+| `provider/`           | 2     | moderate | postcss <8.5.10 via next |
+| `registry/`           | 2     | moderate | postcss <8.5.10 via next |
+| `web/`                | (same next/postcss) | moderate | postcss <8.5.10 via next |
+| `mcp/`                | 0     | —        | clean |
+| `dashboard/`          | 2     | moderate | esbuild + vite |
+| `agents/dataset-seller/` | 0  | —        | no deps beyond node stdlib + better-sqlite3 |
+| `agents/market-monitor/` | 0  | —        | same |
+| `packages/agora-core/`   | 0  | —        | clean |
+
+No HIGH or CRITICAL findings. The next/postcss XSS only matters if a registry or provider page renders untrusted HTML inside a `<style>`; the registry has no such surface, and the provider page is small. Vite/esbuild advisories are dev-server-only (dashboard).
+
+---
+
+## 7. Summary table
+
+| Severity | Count | IDs |
+|----------|-------|-----|
+| P0       | 4     | P0-1, P0-2, P0-3, P0-4 (all still exploitable; P0-2 expanded to three header families) |
+| P1       | 5     | P1-1, P1-2, P1-3, NEW-1, NEW-3 |
+| P2       | 3     | NEW-2, NEW-4, NEW-5 |
+| P3       | 3     | NEW-6, NEW-7, NEW-8 |
+
+Notes:
+- The rebrand pass introduced **no new fixes** to the carried-over P0/P1 list.
+- The rebrand pass introduced **one direct regression** (P0-2 now spoofable across three header families instead of one) and surfaced several new issues, predominantly default-secret leakage and file-mode hygiene.
+- The rebrand pass introduced **one improvement that is undocumented**: the registry's hard-AGORA-family pinning (NEW-6).
+
+End of report. No fixes proposed (per audit brief).
