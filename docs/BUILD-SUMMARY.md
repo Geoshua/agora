@@ -8,6 +8,30 @@ All test gates: **PASS**. The repo's `lumen` npm-root name and the
 backwards-compat tool aliases (now both `lumen_*` AND `andromeda_*`)
 survive intact.
 
+## Lightning rails (post-ADR 0014)
+
+The seller-side L402 macaroon wire format moved to **MoneyDevKit (MDK)**
+shape — `base64(JSON({paymentHash, amountSats, expiresAt, resource,
+amount, currency, sig}))` — keyed via MDK's `mdk402-token-v1` HMAC-SHA256
+KDF tag. The change is invisible to buyers (the macaroon is opaque on
+the wire); only the seller-side mint/verify code changed.
+
+Mock mode (the default) uses an offline shim in
+`packages/agora-core/src/l402.ts` that produces byte-identical
+MDK-shape macaroons with no network egress and no MDK account
+required. Real mode (with `MDK_ACCESS_TOKEN` + `MDK_MNEMONIC`) is wired
+to the same wire format and ready for `@moneydevkit/nextjs/server.withPayment`
+adoption — see ADR 0014 for the full integration plan.
+
+Soft-transition: `verifyAuth` first tries the MDK-shape format, then
+falls back to the legacy `base64url(json).hmac` format — already-issued
+buyer credentials keep verifying for one major-version cycle. The
+phase-0 test gate asserts both paths.
+
+Buyer side (mcp/, buyer/) is unchanged. NWC via `@getalby/sdk`
+`LNClient.pay(invoice)` remains the buyer-side payment rail; the
+buyer treats macaroons as opaque blobs in either format.
+
 ## Branding history
 
 LUMEN (initial) → Andromeda (ADR 0002) → **Agora (ADR 0013, canonical)**.
@@ -165,6 +189,7 @@ to **23 unique handlers**.
 | 0010| Honor & peer review                                          | Accepted |
 | 0012| Public web index (Next.js + RSC, 7 pages, port 3300)         | Accepted |
 | 0013| Rebrand Andromeda → Agora (final project name)               | Accepted |
+| 0014| L402 macaroons migrate to MoneyDevKit (MDK) wire format      | Accepted |
 
 (0009 was reserved for honor primitives but folded into 0010.
 0011 unused.)

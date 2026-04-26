@@ -94,6 +94,18 @@ era was over before they existed.
 
 ---
 
+## Wire format note (ADR 0014)
+
+The seller side mints **MoneyDevKit (MDK)** L402 macaroons. The buyer
+side — this MCP server — treats macaroons as opaque blobs that ride in
+the `Authorization: L402 <macaroon>:<preimage>` header on replay, so
+the migration is **invisible from the buyer's perspective**. No code
+changes here. NWC via `@getalby/sdk` `LNClient.pay(invoice)` continues
+to be the buyer's only Lightning primitive. Already-paid credentials
+issued before ADR 0014 still verify for one deprecation cycle.
+
+---
+
 ## 5-minute install (Claude Desktop)
 
 ### 1 · Install the dependencies

@@ -198,6 +198,13 @@ probes.
 
 ## Going live on Lightning (real sats)
 
+The seller side speaks **MoneyDevKit (MDK)** L402 macaroons on the wire
+(ADR 0014). Mock mode (the default) mints byte-identical MDK-shape
+macaroons offline, with no MDK account required. For real Lightning,
+you have two paths — pick one:
+
+### Path A — NWC + Alby Hub (current default in this repo)
+
 Three things you do; two flags I flip.
 
 ### Step 1 · Get an Alby Hub account (~3 min)
@@ -241,6 +248,27 @@ pays it. Lightning settles in 200–800 ms. The provider verifies the
 preimage against the on-chain `payment_hash` and serves the result.
 
 Watch the Alby Hub UI in another tab to see the sats move.
+
+### Path B — MoneyDevKit hosted Lightning (recommended for production)
+
+The seller-side L402 layer is wire-compatible with MDK out of the box.
+To switch the provider's invoice rail to MDK's hosted-node + LSP:
+
+1. Sign up at <https://moneydevkit.com> and grab `api_key` + a fresh
+   `mnemonic`.
+2. In `provider/.env.local` set:
+   ```
+   MDK_ACCESS_TOKEN=<your api_key>
+   MDK_MNEMONIC=<your bip39 mnemonic>
+   MOCK_MODE=false
+   ```
+3. The provider continues to use its own L402 wrapper today. The full
+   `@moneydevkit/nextjs/server.withPayment` adoption is the documented
+   next step in ADR 0014 §"Migration timeline" — wire format is
+   already MDK-compatible, so the swap is mechanical.
+
+The buyer side is unchanged on either path: `@getalby/sdk` NWC pays
+the bolt-11 invoice from the 402 challenge regardless of who minted it.
 
 ---
 
@@ -317,6 +345,7 @@ All non-trivial decisions are captured in
 - [ADR 0011](docs/decisions/0011-dashboard-implementation.md) — Vite SPA over Tauri-only
 - [ADR 0012](docs/decisions/0012-public-web-index.md) — public web index (Next.js + RSC, 7 pages)
 - [ADR 0013](docs/decisions/0013-rebrand-andromeda-to-agora.md) — second & final rebrand to Agora
+- [ADR 0014](docs/decisions/0014-l402-mdk-migration.md) — L402 macaroons migrate to MoneyDevKit (MDK) wire format
 
 For the day-to-day inventory of every endpoint / tool / test, read
 [`docs/BUILD-SUMMARY.md`](docs/BUILD-SUMMARY.md). For phase-by-phase

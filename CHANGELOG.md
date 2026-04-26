@@ -2,6 +2,63 @@
 
 ## Unreleased — Agora
 
+### Phase MDK — L402 macaroons migrate to MoneyDevKit wire format (2026-04-26)
+
+ADR 0014 makes the seller-side L402 wire format byte-compatible with
+MoneyDevKit (MDK). Buyer side unchanged.
+
+- **`packages/agora-core/src/l402.ts`** rewritten as the canonical
+  source of truth for L402 mint/verify. Exports stay the same names
+  (`mintMacaroon`, `verifyMacaroon`, `verifyPreimage`, `parseAuthHeader`,
+  `challengeHeader`) plus four new ones: `verifyAuth` (soft-transition
+  verifier), `verifyAuthFor` (METHOD+PATH convenience), `mintMacaroonLegacy`
+  / `verifyMacaroonLegacy` (legacy-format helpers, kept for one
+  deprecation cycle so already-issued credentials still verify),
+  `canonicalResource` (METHOD:path canonicalization helper).
+- **Wire format:** `base64(JSON({paymentHash, amountSats, expiresAt,
+  resource, amount, currency, sig}))` keyed via MDK's `mdk402-token-v1`
+  HMAC-SHA256 KDF tag. Resource binds METHOD+PATH as `<METHOD>:<path>`.
+  Authorization header semantics unchanged — `L402 <macaroon>:<preimage>`
+  still works (also accepts the `LSAT` legacy scheme per bLIP-26).
+- **Soft-transition:** `verifyAuth` tries MDK-shape first, falls back
+  to legacy `base64url(json).hmac` on parse/sig failure. The phase-0
+  test gate asserts both paths.
+- **`provider/src/lib/l402.ts`** is now a thin shim around the new
+  `@agora/core` helpers. Same exported `require402`, `verifyAuth`,
+  `authError` signatures so the route files don't churn. Single-use
+  enforcement still lives in `provider`'s SQLite invoices table.
+- **Provider routes** (`/api/v1/listing-verify`, `/api/v1/order-receipt`)
+  now emit `x-agora-l402-family: mdk|legacy` so the soft-transition
+  window is observable. Response shape unchanged.
+- **`agents/dataset-seller`** (`POST /api/v1/dataset/:id/purchase`)
+  switched to MDK-shape mint + soft-transition `verifyAuth`. Mock-mode
+  invoice store now returns 409 on already-consumed payment_hashes
+  (was a silent re-verify previously). Response includes `l402_family`.
+- **`agents/market-monitor`** unchanged — has no L402-gated endpoints
+  (subscribe is trust-deposit per ADR 0005). Comment-only update.
+- **`provider/src/lib/wallet.ts`** kept (mock-mode bolt-11 source +
+  buyer's `/api/dev/pay` lookup); deprecation note added pointing to
+  ADR 0014's "Migration timeline" for the eventual full
+  `@moneydevkit/nextjs/server.withPayment` adoption.
+- **Buyer side (`mcp/`, `buyer/`)** — zero changes. Macaroons are
+  opaque blobs to the buyer; both formats ride the same wire envelope.
+- **Test gates** — `scripts/test-phase0.js` byte-format assertion
+  rewritten to assert the new MDK shape AND a separate assertion that
+  the legacy verifier still parses a hand-synthesized old-format
+  macaroon. `packages/agora-core/test/smoke.test.mjs` grows from
+  20 to 31 assertions covering MDK mint/verify, tamper detection,
+  legacy fallback through `verifyAuth`, resource-mismatch rejection,
+  preimage rejection, LSAT-scheme parsing, and the bLIP-26 challenge
+  header format.
+- **All 10 test gates pass** in mock mode after the migration:
+  phase0 16/16 · phase1b 20/20 · phase2 13/13 · phase3 12/12 · phase3-ui
+  16/16 · phase4 13/13 · phase5 17/17 · phase6 11/11 · phase7 14/14 ·
+  test:mcp 12/12.
+- **New env vars (real-mode only):** `MDK_ACCESS_TOKEN`, `MDK_MNEMONIC`.
+  `L402_SECRET` still required in mock mode (unchanged).
+- **ADR 0014** added; `docs/BUILD-SUMMARY.md`, `README.md`, and
+  `PAYMYAGENT.md` updated.
+
 ### Rebrand Andromeda → Agora (2026-04-26)
 
 The project's final rebrand. Same pattern as ADR 0002, applied a second
