@@ -26,6 +26,7 @@ import {
 } from "./lumen-client.js";
 import { getStatus as budgetStatus, setBudget } from "./budget.js";
 import * as registry from "./registry-client.js";
+import * as subs from "./subscriptions.js";
 import { ensureBuyerIdentity, tryBuyerIdentity } from "./identity.js";
 
 // ─── helpers ──────────────────────────────────────────────────────────
@@ -271,6 +272,161 @@ server.registerTool(
       const r = await registry.listServices({ type, tag, max_price_sats });
       return ok({ services: r.services, count: r.count });
     } catch (e) { return fail(`discover_all failed: ${e.message}`); }
+  },
+);
+
+// ─── andromeda_subscribe (NEW — Phase 2) ──────────────────────────────
+server.registerTool(
+  "andromeda_subscribe",
+  {
+    title: "Andromeda — subscribe to a sat-per-event service",
+    description:
+      "Open a prepaid subscription with a seller (e.g. market-monitor's github-advisory-monitor). " +
+      "Pay a deposit upfront; each delivered alert debits per_event_sats from balance. " +
+      "Returns a subscription_id you'll use for check_alerts / topup / cancel. " +
+      "Use andromeda_search_services with type='monitoring' to find subscribable sellers.",
+    inputSchema: {
+      seller_pubkey: z.string().min(1).describe("Seller's Ed25519 pubkey (hex), from andromeda_list_sellers"),
+      service_local_id: z.string().min(1).describe("Local service id at the seller (e.g. 'github-advisory-monitor')"),
+      deposit_sats: z.number().int().positive().describe("Initial sats to deposit"),
+      per_event_sats: z.number().int().positive().optional().describe("Sats charged per delivered event (default seller's)"),
+      config: z.record(z.string(), z.any()).optional().describe("Service-specific config, e.g. { watched_repos: [...], severity_min: 'high' }"),
+    },
+  },
+  async ({ seller_pubkey, service_local_id, deposit_sats, per_event_sats, config }) => {
+    try {
+      const id = await ensureBuyerIdentity();
+      const sellerUrl = await registry.sellerUrl(seller_pubkey);
+      if (!sellerUrl) return fail(`unknown seller: ${seller_pubkey}`);
+      const r = await fetch(`${sellerUrl}/api/v1/subscribe`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subscriber_pubkey: id.pubkey,
+          service_local_id,
+          deposit_sats,
+          per_event_sats,
+          config: config ?? {},
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) return fail(`subscribe failed: ${j.error ?? r.status}`);
+      subs.remember(j.subscription_id, {
+        seller_pubkey, seller_url: sellerUrl, service_local_id,
+        per_event_sats: j.per_event_sats, balance_sats: j.balance_sats,
+      });
+      return ok({
+        subscription_id: j.subscription_id,
+        seller_pubkey, seller_url: sellerUrl, service_local_id,
+        per_event_sats: j.per_event_sats, balance_sats: j.balance_sats,
+        status: j.status,
+      });
+    } catch (e) { return fail(`subscribe error: ${e.message}`); }
+  },
+);
+
+// ─── andromeda_list_subscriptions (NEW) ───────────────────────────────
+server.registerTool(
+  "andromeda_list_subscriptions",
+  {
+    title: "Andromeda — list subscriptions",
+    description: "Lists active subscriptions tracked by this MCP session (cached locally). Free.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const all = subs.listAll();
+      const list = await Promise.all(Object.entries(all).map(async ([sid, info]) => {
+        // Refresh balance from seller.
+        try {
+          const r = await fetch(`${info.seller_url}/api/v1/subscriptions/${sid}`);
+          if (r.ok) {
+            const j = await r.json();
+            return { ...info, subscription_id: sid, balance_sats: j.balance_sats, status: j.status };
+          }
+        } catch {}
+        return { ...info, subscription_id: sid };
+      }));
+      return ok({ subscriptions: list, count: list.length });
+    } catch (e) { return fail(`list_subscriptions failed: ${e.message}`); }
+  },
+);
+
+// ─── andromeda_check_alerts (NEW) ─────────────────────────────────────
+server.registerTool(
+  "andromeda_check_alerts",
+  {
+    title: "Andromeda — poll subscription alerts",
+    description:
+      "Fetches new alerts for a subscription since the last poll. Updates the local 'last_seen_alert_ms' watermark so subsequent calls are incremental. Free.",
+    inputSchema: {
+      subscription_id: z.string().min(1),
+      since_ms: z.number().int().nonnegative().optional().describe("Override watermark (default: last seen)"),
+    },
+  },
+  async ({ subscription_id, since_ms }) => {
+    try {
+      const info = subs.lookup(subscription_id);
+      if (!info) return fail(`unknown subscription_id: ${subscription_id}`);
+      const since = since_ms ?? info.last_seen_alert_ms ?? 0;
+      const r = await fetch(`${info.seller_url}/api/v1/subscriptions/${subscription_id}/alerts?since=${since}`);
+      const j = await r.json();
+      if (!r.ok) return fail(`check_alerts: ${j.error ?? r.status}`);
+      // Bump watermark
+      const newest = j.alerts.length ? j.alerts[j.alerts.length - 1].created_at_ms : since;
+      subs.bumpSinceMs(subscription_id, newest);
+      return ok({ subscription_id, since, alerts: j.alerts, count: j.count });
+    } catch (e) { return fail(`check_alerts failed: ${e.message}`); }
+  },
+);
+
+// ─── andromeda_topup_subscription (NEW) ───────────────────────────────
+server.registerTool(
+  "andromeda_topup_subscription",
+  {
+    title: "Andromeda — top up a subscription",
+    description:
+      "Add sats to a subscription's balance. In mock mode, no actual payment moves; in real mode the seller will issue an L402 challenge.",
+    inputSchema: {
+      subscription_id: z.string().min(1),
+      sats: z.number().int().positive(),
+    },
+  },
+  async ({ subscription_id, sats }) => {
+    try {
+      const info = subs.lookup(subscription_id);
+      if (!info) return fail(`unknown subscription_id: ${subscription_id}`);
+      const r = await fetch(`${info.seller_url}/api/v1/subscriptions/${subscription_id}/topup`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sats }),
+      });
+      const j = await r.json();
+      if (!r.ok) return fail(`topup: ${j.error ?? r.status}`);
+      subs.remember(subscription_id, { balance_sats: j.balance_sats });
+      return ok({ subscription_id, balance_sats: j.balance_sats, status: j.status });
+    } catch (e) { return fail(`topup failed: ${e.message}`); }
+  },
+);
+
+// ─── andromeda_cancel_subscription (NEW) ──────────────────────────────
+server.registerTool(
+  "andromeda_cancel_subscription",
+  {
+    title: "Andromeda — cancel a subscription",
+    description: "Cancel an active subscription. In mock mode the unused balance is returned to the buyer's session counter.",
+    inputSchema: { subscription_id: z.string().min(1) },
+  },
+  async ({ subscription_id }) => {
+    try {
+      const info = subs.lookup(subscription_id);
+      if (!info) return fail(`unknown subscription_id: ${subscription_id}`);
+      const r = await fetch(`${info.seller_url}/api/v1/subscriptions/${subscription_id}/cancel`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) return fail(`cancel: ${j.error ?? r.status}`);
+      subs.forget(subscription_id);
+      return ok({ subscription_id, refunded_sats: j.refunded_sats, status: j.status });
+    } catch (e) { return fail(`cancel failed: ${e.message}`); }
   },
 );
 

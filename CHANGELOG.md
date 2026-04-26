@@ -2,6 +2,37 @@
 
 ## Unreleased — Andromeda
 
+### Phase 2 — Subscriptions & monitoring seller (2026-04-26)
+
+- Provider gains subscription primitives (additive, no break to
+  existing endpoints):
+    POST /api/v1/subscribe                       (mock-trust deposit)
+    GET  /api/v1/subscriptions/:id
+    POST /api/v1/subscriptions/:id/topup
+    POST /api/v1/subscriptions/:id/cancel
+    GET  /api/v1/subscriptions/:id/alerts?since=
+    POST /api/dev/fire-alert                     (mock-only)
+  New SQLite tables: `subscriptions`, `subscription_alerts`. Atomic
+  debit-and-emit transaction (`debitAndAlert`) handles balance
+  arithmetic + balance_exhausted edge case.
+- New workspace `agents/market-monitor/` — focused JS HTTP service on
+  port 3100. Sells `github-advisory-monitor` (50 sat/event, 1000 sat
+  default deposit). Self-registers with the registry on boot. Watcher
+  loop polls advisories (mock-mode reads `src/fixtures/advisories.json`;
+  real-mode polls api.github.com/advisories) and fans alerts out to
+  active subscribers matching `watched_repos` + `severity_min`.
+- Each alert is HMAC-signed by the seller (over kind+payload).
+- 5 new MCP tools (no aliases — Phase 2 only):
+    andromeda_subscribe
+    andromeda_list_subscriptions
+    andromeda_check_alerts
+    andromeda_topup_subscription
+    andromeda_cancel_subscription
+  Local subscription cache persisted to ~/.andromeda/subscriptions.json.
+- ADR 0005 — prepaid-balance + polled-alert design.
+- Phase 2 test gate (`scripts/test-phase2.js`) — PASS · 12/12.
+- Legacy `npm run test:mcp` still PASS · 12/12.
+
 ### Phase 1 — Multi-seller registry (2026-04-26)
 
 - New workspace `registry/` (Next.js 16 + better-sqlite3, port 3030).

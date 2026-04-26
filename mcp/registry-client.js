@@ -30,3 +30,9 @@ export async function searchServices(query, opts = {}) {
 export async function registryHealth() { return getJson("/api/v1/health"); }
 
 export const REGISTRY_URL = REGISTRY;
+
+// ─── seller URL lookup ──────────────────────────────────────────────
+export async function sellerUrl(pubkey) {
+  const j = await getSeller(pubkey);
+  return j.seller?.url ?? null;
+}

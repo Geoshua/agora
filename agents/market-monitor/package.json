@@ -9,6 +9,7 @@
     "dev": "node src/server.js"
   },
   "dependencies": {
-    "@andromeda/core": "*"
+    "@andromeda/core": "*",
+    "better-sqlite3": "^12.9.0"
   }
 }
